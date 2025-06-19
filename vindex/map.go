@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"strconv"
 	"strings"
@@ -52,15 +53,7 @@ type InputLog interface {
 	// StreamLeaves returns all the leaves in the range [start, end), outputting them via
 	// the out channel.
 	// TODO(mhutchinson): This out channel would be better as a returned iterator.
-	StreamLeaves(ctx context.Context, start, end uint64, out chan<- LeafOrError)
-}
-
-// LeafOrError represents a single leaf in the input log.
-type LeafOrError struct {
-	// Leaf is the raw data stored at this leaf.
-	Leaf []byte
-	// Error contains any error fetching this leaf, and should be checked before Leaf.
-	Error error
+	StreamLeaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error]
 }
 
 // OpenCheckpointFn is a function that parses a checkpoint, validating it, and returns a parsed
@@ -199,41 +192,34 @@ func (b *VerifiableIndex) syncFromInputLog(ctx context.Context) error {
 	if b.cpSize > b.nextIndex {
 		ctx, done := context.WithCancel(ctx)
 		defer done()
-		leaves := make(chan LeafOrError, 1)
-		go b.inputLog.StreamLeaves(ctx, b.nextIndex, b.cpSize, leaves)
-
-		var l LeafOrError
-		for ; b.nextIndex < b.cpSize; b.nextIndex++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case l = <-leaves:
-			}
-			if err := l.Error; err != nil {
-				return fmt.Errorf("failed to read leaf at index %d: %v", b.nextIndex, err)
+		for l, err := range b.inputLog.StreamLeaves(ctx, b.nextIndex, b.cpSize) {
+			idx := b.nextIndex
+			b.nextIndex++
+			if err != nil {
+				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
 			}
 			var hashes [][32]byte
 			var mapErr error
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						mapErr = fmt.Errorf("panic detected mapping index %d: %s", b.nextIndex, r)
+						mapErr = fmt.Errorf("panic detected mapping index %d: %s", idx, r)
 					}
 				}()
-				hashes = b.mapFn(l.Leaf)
+				hashes = b.mapFn(l)
 			}()
 			if mapErr != nil {
 				return mapErr
 			}
-			if len(hashes) == 0 && b.nextIndex < b.cpSize-1 {
+			if len(hashes) == 0 && idx < b.cpSize-1 {
 				// We can skip writing out values with no hashes, as long as we're
 				// not at the end of the log.
 				// If we are at the end of the log, we need to write out a value as a sentinel
 				// even if there are no hashes.
 				continue
 			}
-			if err := b.wal.append(b.nextIndex, hashes); err != nil {
-				return fmt.Errorf("failed to add index to entry for leaf %d: %v", b.nextIndex, err)
+			if err := b.wal.append(idx, hashes); err != nil {
+				return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
 			}
 		}
 	}
@@ -277,6 +263,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 				updatedKeys[h] = true
 			}
 		}()
+		klog.V(2).Infof("buildMap up to %d of %d", b.mapSize, b.cpSize-1)
 	}
 	durationWal := time.Since(startWal)
 
