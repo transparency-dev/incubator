@@ -423,7 +423,7 @@ func (l *writeAheadLog) append(idx uint64, hashes [][32]byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal entry: %v", err)
 	}
-	_, err = l.f.WriteString(fmt.Sprintf("%s\n", e))
+	_, err = fmt.Fprintf(l.f, "%s\n", e)
 	return err
 }
 
