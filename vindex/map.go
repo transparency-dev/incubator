@@ -43,6 +43,11 @@ import (
 // MapFn takes the raw leaf data from a log entry and outputs the SHA256 hashes
 // of the keys at which this leaf should be indexed under.
 // A leaf can be recorded at any number of entries, including no entries (in which case an empty slice must be returned).
+//
+// MapFn is expected to consume any error states that it encounters in some way that
+// makes sense to the particular ecosystem. This might mean outputting any invalid leaves
+// at a known locations (e.g. all 0s), or not outputting any entry. Any panics will cause
+// the mapping process to terminate.
 type MapFn func([]byte) [][32]byte
 
 // InputLog represents a connection to the input log from which map data will be built.
@@ -112,7 +117,7 @@ type VerifiableIndex struct {
 	nextIndex uint64 // nextIndex is the next index in the log to consume
 	rawCp     []byte // rawCp is the last checkpoint we started syncing to
 	cpSize    uint64 // cpSize is the tree size of rawCp
-	mapSize   uint64 // mapSize is the last index from the log that was put into the map
+	mapSize   uint64 // mapSize is the total number of leaves processed into the map
 
 	// servingSize is the size of the input log we are serving for.
 	// This a temporary workaround not having an output log, which we will eventually read to get
@@ -194,10 +199,12 @@ func (b *VerifiableIndex) syncFromInputLog(ctx context.Context) error {
 		defer done()
 		for l, err := range b.inputLog.StreamLeaves(ctx, b.nextIndex, b.cpSize) {
 			idx := b.nextIndex
-			b.nextIndex++
 			if err != nil {
 				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
 			}
+
+			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
+			// and failing gracefully.
 			var hashes [][32]byte
 			var mapErr error
 			func() {
@@ -211,6 +218,7 @@ func (b *VerifiableIndex) syncFromInputLog(ctx context.Context) error {
 			if mapErr != nil {
 				return mapErr
 			}
+			b.nextIndex++
 			if len(hashes) == 0 && idx < b.cpSize-1 {
 				// We can skip writing out values with no hashes, as long as we're
 				// not at the end of the log.
@@ -231,7 +239,7 @@ func (b *VerifiableIndex) syncFromInputLog(ctx context.Context) error {
 func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	startWal := time.Now()
 	updatedKeys := make(map[[32]byte]bool) // Allows us to efficiently update vindex after first init
-	for b.mapSize < b.cpSize-1 {
+	for b.mapSize < b.cpSize {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -253,7 +261,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 		func() {
 			b.indexMu.Lock()
 			defer b.indexMu.Unlock()
-			b.mapSize = idx
+			b.mapSize = idx + 1
 			for _, h := range hashes {
 				klog.V(2).Infof("Read from WAL: index %d: %x", idx, h)
 				// Add the data to the key/value map
@@ -263,7 +271,6 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 				updatedKeys[h] = true
 			}
 		}()
-		klog.V(2).Infof("buildMap up to %d of %d", b.mapSize, b.cpSize-1)
 	}
 	durationWal := time.Since(startWal)
 
