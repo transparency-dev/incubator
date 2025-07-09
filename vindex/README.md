@@ -7,6 +7,9 @@ This idea has been distilled from years of experiments with maps, and a pressing
 This experiment should be considered a 20% project for the time being and isn't on the near-term official roadmap for transparency.dev.
 Discussions are welcome, please join us on [Transparency-Dev Slack](https://transparency.dev/slack/).
 
+[tlog-tiles]: https://c2sp.org/tlog-tiles
+[Tessera]: https://github.com/transparency-dev/tessera
+
 ## Overview
 
 ### The Problem: Verifiability vs. Efficiency
@@ -182,19 +185,34 @@ Values are an ordered list of indices.
 
 ## Status
 
-There is a basic end-to-end application written that currently only supports SumDB.
-This application:
- - Reads a local [SumDB clone](https://github.com/google/trillian-examples/tree/master/clone/cmd/sumdbclone)
- - Builds a map, in the format described above
- - Serves a Lookup API via HTTP
+There is a basic end-to-end application written that supports SumDB in [trillian-examples](https://github.com/google/trillian-examples/tree/master/experimental/vindex/cmd).
 
-Running it:
- 1. Have a fully mirrored SumDB using `sumdbclone` (the easiest way is to use `docker compose up`, and wait)
- 1. Run the verifiable index binary: `go run ./experimental/vindex/cmd --logDSN="sumdb:letmein@tcp(127.0.0.1:33006)/sumdb"  --walPath ~/sumdb.wal`
+In this repository, there is a demo of running a [tlog-tiles][] log using [Tessera][], and keeping the contents of that log synced to a map.
+Below are instructions for running this demo with sample key material:
 
-Providing the above works, you will have a web server hosting a form at http://localhost:8088.
-This form takes a package name for SumDB (e.g. `github.com/transparency-dev/tessera`), and outputs all indices in the SumDB log corresponding to that package.
-You will also have a WAL file at `~/sumdb.wal`, which will make future boots faster.
+```shell
+LOG_PRIVATE_KEY=PRIVATE+KEY+logandmap+38581672+AXJ0FKWOcO2ch6WC8kP705Ed3Gxu7pVtZLhfHAQwp+FE; go run ./vindex/cmd/logandmap --input_log_dir ~/logandmap/inputlog/ --walPath ~/logandmap/map.wal
+```
+
+Running the above will run a web server hosting the following URLs:
+ - `/inputlog/` - the [tlog-tiles][]
+ - `/vindex/lookup` - the provisional [vindex lookup API](./api/api.go)
+ - `/outputlog/` - TODO(mhutchinson): this is where the output log will be hosted
+
+The input log has entries for packages in the set {`foo`, `bar`, `baz`, `splat`}.
+To inspect the log, you can use the woodpecker tool (using the corresponding public key to the private key used above):
+
+```shell
+go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/inputlog --custom_log_vkey=logandmap+38581672+Ab/PCr1eCclRPRMBqw/r5An1xO71MCnImLiospEq6b4l
+```
+
+Use left/right cursor to browse, and `q` to quit.
+
+This log is processed into a verifiable map which can be looked up using the following command:
+
+```shell
+go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --key=foo
+```
 
 ## Milestones
 

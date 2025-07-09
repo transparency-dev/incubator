@@ -51,15 +51,16 @@ import (
 )
 
 var (
-	posixLogDir = flag.String("posix_log_dir", "", "Root directory in which to store the log for the POSIX backend")
 	privKeyFile = flag.String("private_key", "", "Location of private key file. If unset, uses the contents of the LOG_PRIVATE_KEY environment variable.")
+	inputLogDir = flag.String("input_log_dir", "", "Root directory in which to store the log for the POSIX-based Input Log")
 	walPath     = flag.String("walPath", "", "Path to use for the Write Ahead Log. If empty, a temporary file will be used.")
 	listen      = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
 func main() {
-	flag.Parse()
 	klog.InitFlags(nil)
+	flag.Parse()
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -75,15 +76,15 @@ type LogEntry struct {
 }
 
 func run(ctx context.Context) error {
-	if *posixLogDir == "" {
-		return errors.New("posix_log_dir must be set")
+	if *inputLogDir == "" {
+		return errors.New("input_log_dir must be set")
 	}
 
 	// Gather the info needed for reading/writing checkpoints
 	s, v := getSignerVerifierOrDie()
 
 	// Set up a Tessera POSIX log
-	driver, err := posix.New(ctx, *posixLogDir)
+	driver, err := posix.New(ctx, posix.Config{Path: *inputLogDir})
 	if err != nil {
 		return fmt.Errorf("failed to create new log: %v", err)
 	}
@@ -91,6 +92,7 @@ func run(ctx context.Context) error {
 	// Get a Tessera appender
 	appender, shutdown, reader, err := tessera.NewAppender(ctx, driver, tessera.NewAppendOptions().
 		WithCheckpointSigner(s).
+		WithCheckpointInterval(10*time.Second).
 		WithBatching(256, time.Second))
 	if err != nil {
 		return fmt.Errorf("failed to get appender: %v", err)
@@ -209,21 +211,24 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 			if idx, err := appender.Add(ctx, tessera.NewEntry(data))(); err != nil {
 				klog.Errorf("Failed to append to log: %v", err)
 			} else {
-				klog.Infof("Appended entry for %s@%s at index %d", module, version, idx.Index)
+				klog.V(2).Infof("Appended entry for %s@%s at index %d", module, version, idx.Index)
 			}
 		}
 	}
 }
 
 func runWebServer(vi *vindex.VerifiableIndex) {
-	web := NewServer(func(s string) string {
-		idxes := vi.Lookup(s)
-		return fmt.Sprintf("Indices in log: %v", idxes)
+	web := NewServer(func(h [sha256.Size]byte) ([]uint64, error) {
+		idxes, size := vi.Lookup(h)
+		if size == 0 {
+			return nil, errors.New("index not populated")
+		}
+		return idxes, nil
 	})
 
-	fs := http.FileServer(http.Dir(*posixLogDir))
+	ilfs := http.FileServer(http.Dir(*inputLogDir))
 	r := mux.NewRouter()
-	r.PathPrefix("/log/").Handler(http.StripPrefix("/log/", fs))
+	r.PathPrefix("/inputlog/").Handler(http.StripPrefix("/inputlog/", ilfs))
 	web.registerHandlers(r)
 	hServer := &http.Server{
 		Addr:    *listen,
