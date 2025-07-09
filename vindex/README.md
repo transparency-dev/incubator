@@ -5,7 +5,7 @@ Status: Experimental.
 This idea has been distilled from years of experiments with maps, and a pressing need to have an efficient and verifiable way for an end-user to find _their_ data in logs without needing to download the whole log.
 
 This experiment should be considered a 20% project for the time being and isn't on the near-term official roadmap for transparency.dev.
-Discussions are welcome, please join us on [Transparency-Dev Slack](https://join.slack.com/t/transparency-dev/shared_invite/zt-27pkqo21d-okUFhur7YZ0rFoJVIOPznQ).
+Discussions are welcome, please join us on [Transparency-Dev Slack](https://transparency.dev/slack/).
 
 ## Overview
 
