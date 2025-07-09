@@ -48,10 +48,6 @@ type Server struct {
 // serveForm handles GET requests to the root path ("/")
 // It renders the HTML form.
 func (s Server) serveForm(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -65,9 +61,9 @@ func (s Server) serveForm(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSubmit handles POST requests to "/submit"
+// handleLookup handles POST requests for looking up map entries.
 // It parses the form data and responds.
-func (s Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
+func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -89,6 +85,6 @@ func (s Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s Server) registerHandlers(r *mux.Router) {
-	r.HandleFunc("/", s.serveForm).Methods("GET")
-	r.HandleFunc("/submit", s.handleSubmit).Methods("POST")
+	r.HandleFunc("/vindex/", s.serveForm).Methods("GET")
+	r.HandleFunc("/vindex/lookup", s.handleLookup).Methods("POST")
 }

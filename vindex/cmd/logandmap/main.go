@@ -222,7 +222,9 @@ func runWebServer(vi *vindex.VerifiableIndex) {
 		return fmt.Sprintf("Indices in log: %v", idxes)
 	})
 
+	fs := http.FileServer(http.Dir(*posixLogDir))
 	r := mux.NewRouter()
+	r.PathPrefix("/log/").Handler(http.StripPrefix("/log/", fs))
 	web.registerHandlers(r)
 	hServer := &http.Server{
 		Addr:    *addr,
