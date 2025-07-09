@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// vindex contains a prototype of an in-memory verifiable index.
-// It reads data from an InputLog interface, applies a MapFn to every leaf in the
-// input log, and writes the mapped information out to a Write Ahead Log. Data is
-// read from the WAL, and the in-memory map is built from this.
+// logandmap is a binary that serves as a demo of how to run a log and a map in the
+// same process.
+// The log is a Tessera POSIX log, and the map is an in-memory verifiable index.
+// A web server is hosted that allows lookups in the map to be performed.
+// The log is updated periodically with entries of type LogEntry, and the map keys
+// each of the module names from that struct to each of the indices in the log where
+// an entry for that module is stored.
 package main
 
 import (
