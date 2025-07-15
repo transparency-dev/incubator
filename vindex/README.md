@@ -9,9 +9,28 @@ Discussions are welcome, please join us on [Transparency-Dev Slack](https://tran
 
 ## Overview
 
-The core idea is basically to construct an index like you would find in the back of a book, i.e. search terms are mapped to a _pointer_ to where the data can be found.
+### Problem
+
+Logs support verifiable lookup of leaves by index, but there is no support for _verifiably_ returning leaves matching any other criteria.
+This is important because in many cases, logs contain data where only a small subset of the data is relevant to a particular actor.
+For example:
+ - CT: a domain owner is only interested in the small set of certs for domains they operate. Even for a large domain owner such as Google, this will be under 1% of all data in a log.
+ - Package Repository: a package owner is only interested in the packages they maintain, but this will be dwarved by entries for packages they don't maintain.
+
+Without a Verifiable Index, these actors must choose one of 2 approaches to discover entries in a log that relate to them:
+ 1. Download every entry from the log in order to perform the filtering locally
+ 2. Rely on a non-verifiable index, e.g. [CT Monitors](https://certificate.transparency.dev/monitors/).
+
+In the first case, they need to download a large amount of irrelevant data in order to stay secure.
+In the second case, they need to rely on a service that breaks the chain of verifiability; a non-verifiable index may not return the full set of leaves to the requester, whether intentionally or accidentally.
+
+### Solution
+
+The core idea is to construct an index, similar to a [back-of-the-book index](https://en.wikipedia.org/wiki/Index_(publishing)), i.e. search terms are mapped to a _pointer_ to where the data can be found.
 A verifiable index represents an efficient data structure to allow point lookups to common queries over a single log.
-For example, a verifiable index over a module/package repository could be constructed to allow efficient lookup of all modules/packages with a given name.
+Examples:
+ - CT: a verifiable index over a CT log would allow certs to be efficiently and verifiably searched by domain name.
+ - Package Repository: a verifiable index over a module/package repository would allow lookup of all modules/packages with a given name.
 
 The result of looking up a key in a verifiable index is a list of uint64 pointers to the origin log, i.e. a list of indices in the origin log where the leaf data matches the index function.
 The index has a checkpoint that commits to its state at any particular log size.
