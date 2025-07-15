@@ -9,33 +9,29 @@ Discussions are welcome, please join us on [Transparency-Dev Slack](https://tran
 
 ## Overview
 
-### Problem
+### The Problem: Verifiability vs. Efficiency
 
-Logs support verifiable lookup of leaves by index, but there is no support for _verifiably_ returning leaves matching any other criteria.
-This is important because in many cases, logs contain data where only a small subset of the data is relevant to a particular actor.
-For example:
- - CT: a domain owner is only interested in the small set of certs for domains they operate. Even for a large domain owner such as Google, this will be under 1% of all data in a log.
- - Package Repository: a package owner is only interested in the packages they maintain, but this will be dwarved by entries for packages they don't maintain.
+Logs, such as those used in Certificate Transparency or Software Supply Chains, provide a strong foundation for verifiability. You can prove that an entry exists in a log. However, they lack a critical feature: the ability to _verifiably_ query for entries based on their content.
 
-Without a Verifiable Index, these actors must choose one of 2 approaches to discover entries in a log that relate to them:
- 1. Download every entry from the log in order to perform the filtering locally
- 2. Rely on a non-verifiable index, e.g. [CT Monitors](https://certificate.transparency.dev/monitors/).
+This forces users who need to find specific data, like a domain owner finding their certificates, or a developer finding their software packages, into a painful choice:
 
-In the first case, they need to download a large amount of irrelevant data in order to stay secure.
-In the second case, they need to rely on a service that breaks the chain of verifiability; a non-verifiable index may not return the full set of leaves to the requester, whether intentionally or accidentally.
+1.  **Massive Inefficiency**: Download and process the _entire_ log, which can be terabytes of mostly irrelevant data, just to find the few entries that matter to you.
+2.  **Broken Trust**: Rely on a third-party service to index the data. This breaks the chain of verifiability, as the index operator could, by accident or design, fail to show you all the results. You are forced to trust them.
 
-### Solution
+Neither option is acceptable. Users should not have to sacrifice efficiency for security, or security for efficiency.
 
-The core idea is to construct an index, similar to a [back-of-the-book index](https://en.wikipedia.org/wiki/Index_(publishing)), i.e. search terms are mapped to a _pointer_ to where the data can be found.
-A verifiable index represents an efficient data structure to allow point lookups to common queries over a single log.
-Examples:
- - CT: a verifiable index over a CT log would allow certs to be efficiently and verifiably searched by domain name.
- - Package Repository: a verifiable index over a module/package repository would allow lookup of all modules/packages with a given name.
+### The Solution: A Verifiable "Back-of-the-Book" Index
 
-The result of looking up a key in a verifiable index is a list of uint64 pointers to the origin log, i.e. a list of indices in the origin log where the leaf data matches the index function.
-The index has a checkpoint that commits to its state at any particular log size.
-Every point lookup (i.e. query) in the map is verifiable, as is the construction of the index itself.
-The verifiable index commits to all evolutions of its state by committing to all published index roots in a witnessed output log.
+A Verifiable Index resolves this conflict by providing a third option: an efficient, cryptographically verifiable way to query log data without compromise.
+
+At its core, it works like a familiar back-of-the-book index. It maps search terms (like a domain or package name) to the exact locations (pointers) in the main log where that data can be found.
+
+This provides two key guarantees:
+
+-   **Efficiency**: Users can look up data by a meaningful key and receive a small, targeted list of pointers back, avoiding the need to download the entire log.
+-   **Verifiability**: Every query comes with a cryptographic proof. This proof guarantees that the list of results is complete and that the index operator has not omitted any entries for your query.
+
+The result is a system that extends the verifiability of the underlying log to its queries, preserving the end-to-end chain of trust while providing the efficiency modern systems require. The index's own state is committed to a witnessed "Output Log", ensuring its entire history is also verifiable.
 
 ## Applications
 
