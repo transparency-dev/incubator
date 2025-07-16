@@ -201,14 +201,17 @@ You will also have a WAL file at `~/sumdb.wal`, which will make future boots fas
 |  #  | Step                                                      | Status |
 | :-: | --------------------------------------------------------- | :----: |
 |  1  | Public code base and documentation for prototype          |   ✅   |
-|  2  | Implementation of Merkle Radix Tree                       |   ✅   |
+|  2  | Implementation of in-memory Merkle Radix Tree             |   ✅   |
 |  3  | Incremental update                                        |   ✅   |
 |  4  | Example written for mapping SumDB                         |   ✅   |
-|  5  | Example written for mapping CT                            |   ⚠️   |
+|  5  | Proofs served on Lookup                                   |   ❌   |
 |  6  | Output log                                                |   ❌   |
-|  7  | Proofs served on Lookup                                   |   ❌   |
-|  8  | MapFn defined in WASM                                     |   ❌   |
-|  9  | Proper repository for this code to live long-term         |   ❌   |
-|  10 | Support reading directly from Input Log instead of Clone  |   ❌   |
+|  7  | Storage backed verifiable-map                             |   ❌   |
+|  8  | Example written for mapping CT                            |   ⚠️   |
+|  9  | MapFn defined in WASM                                     |   ❌   |
+|  10 | Proper repository for this code to live long-term         |   ❌   |
+|  11 | Support reading directly from Input Log instead of Clone  |   ❌   |
 |  N  | Production ready                                          |   ❌   |
 
+
+Note that a storage-backed map needs to be implemented before this can be applied to larger logs, e.g. CT.
