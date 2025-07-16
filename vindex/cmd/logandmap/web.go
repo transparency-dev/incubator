@@ -69,8 +69,7 @@ func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseForm()
-	if err != nil {
+	if err := r.ParseForm(); err != nil {
 		http.Error(w, fmt.Sprintf("Error parsing form: %v", err), http.StatusBadRequest)
 		return
 	}

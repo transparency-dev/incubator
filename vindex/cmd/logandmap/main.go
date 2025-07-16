@@ -54,7 +54,7 @@ var (
 	posixLogDir = flag.String("posix_log_dir", "", "Root directory in which to store the log for the POSIX backend")
 	privKeyFile = flag.String("private_key", "", "Location of private key file. If unset, uses the contents of the LOG_PRIVATE_KEY environment variable.")
 	walPath     = flag.String("walPath", "", "Path to use for the Write Ahead Log. If empty, a temporary file will be used.")
-	addr        = flag.String("addr", ":8088", "Address to set up HTTP server listening on")
+	listen      = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
 func main() {
@@ -64,7 +64,7 @@ func main() {
 	defer cancel()
 
 	if err := run(ctx); err != nil {
-		klog.Exitf("run failed: %v", err)
+		klog.Exitf("Run failed: %v", err)
 	}
 }
 
@@ -178,10 +178,9 @@ func maintainMap(ctx context.Context, vi *vindex.VerifiableIndex) {
 }
 
 // submitEntries continually creates new log entries and submits them to the log.
-// Entries should be json-encoded LogEntrys.
-// The module should be randomly pulled from a list of [foo, bar, baz, splat]
-// The version should be the current timestamp, as a string
-// The hash should be the sha256 of the module+version
+// Entries are json-encoded LogEntry structs. The module are randomly pulled from a
+// list of [foo, bar, baz, splat]. The version is the current timestamp, as a string.
+// The hash is set to the sha256 of the module+version.
 func submitEntries(ctx context.Context, appender *tessera.Appender) {
 	modules := []string{"foo", "bar", "baz", "splat"}
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -227,13 +226,13 @@ func runWebServer(vi *vindex.VerifiableIndex) {
 	r.PathPrefix("/log/").Handler(http.StripPrefix("/log/", fs))
 	web.registerHandlers(r)
 	hServer := &http.Server{
-		Addr:    *addr,
+		Addr:    *listen,
 		Handler: r,
 	}
 	go func() {
 		_ = hServer.ListenAndServe()
 	}()
-	klog.Infof("Started HTTP server listening on %s", *addr)
+	klog.Infof("Started HTTP server listening on %s", *listen)
 }
 
 // Read log private key from file or environment variable and generate the
@@ -259,6 +258,7 @@ func getSignerVerifierOrDie() (note.Signer, note.Verifier) {
 	return s, v
 }
 
+// TODO(mhutchinson): move this into t-dev/formats.
 func signerVerifierFromSkey(skey string) (note.Signer, note.Verifier, error) {
 	const algEd25519 = 1
 	s, err := note.NewSigner(skey)
@@ -313,6 +313,10 @@ func mapFnFromFlags() vindex.MapFn {
 			panic(fmt.Errorf("failed to unmarshal entry: %v", err))
 		}
 
+		// This returns a key which is simply the hash of the module name.
+		// This could be changed to return something more complex, e.g. include
+		// a static prefix of "module=", which would allow the same map to host
+		// multiple queries in parallel.
 		return [][32]byte{sha256.Sum256([]byte(entry.Module))}
 	}
 	return mapFn
