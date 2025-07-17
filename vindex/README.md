@@ -11,27 +11,27 @@ Discussions are welcome, please join us on [Transparency-Dev Slack](https://tran
 
 ### The Problem: Verifiability vs. Efficiency
 
-Logs, such as those used in Certificate Transparency or Software Supply Chains, provide a strong foundation for verifiability. You can prove that an entry exists in a log. However, they lack a critical feature: the ability to _verifiably_ query for entries based on their content.
+Logs, such as those used in Certificate Transparency or Software Supply Chains, provide a strong foundation for discoverability. You can prove that an entry exists in a log. However, they lack a critical feature: the ability to _verifiably_ query for entries based on their content.
 
 This forces users who need to find specific data, like a domain owner finding their certificates, or a developer finding their software packages, into a painful choice:
 
 1.  **Massive Inefficiency**: Download and process the _entire_ log, which can be terabytes of mostly irrelevant data, just to find the few entries that matter to you.
-2.  **Broken Trust**: Rely on a third-party service to index the data. This breaks the chain of verifiability, as the index operator could, by accident or design, fail to show you all the results. You are forced to trust them.
+2.  **Losing Verifiability**: Rely on a third-party service to index the data. This breaks the chain of verifiability, as the index operator could, by accident or design, fail to show you all the results. You are forced to trust them.
 
 Neither option is acceptable. Users should not have to sacrifice efficiency for security, or security for efficiency.
 
 ### The Solution: A Verifiable "Back-of-the-Book" Index
 
-A Verifiable Index resolves this conflict by providing a third option: an efficient, cryptographically verifiable way to query log data without compromise.
+A Verifiable Index resolves this conflict by providing a third option: an efficient, cryptographically verifiable way to query log data.
 
 At its core it works like a familiar index, much like one would find in the back of a book. It maps search terms (like a domain or package name) to the exact locations (pointers) in the main log where that data can be found.
 
 This provides two key guarantees:
 
 -   **Efficiency**: Users can look up data by a meaningful key and receive a small, targeted list of pointers back, avoiding the need to download the entire log.
--   **Verifiability**: Every query comes with a cryptographic proof. This proof guarantees that the list of results is complete and that the index operator has not omitted any entries for your query.
+-   **Verifiability**: Every lookup response comes with a cryptographic proof. This proof guarantees that the list of results is complete and that the index operator has not omitted any entries for your query.
 
-The result is a system that extends the verifiability of the underlying log to its queries, preserving the end-to-end chain of trust while providing the efficiency modern systems require. The index's own state is committed to a witnessed "Output Log", ensuring its entire history is also verifiable.
+The result is a system that extends the verifiability of the underlying log to its queries, preserving the end-to-end chain of trust while providing the efficiency modern systems require.
 
 ## Applications
 
