@@ -9,14 +9,29 @@ Discussions are welcome, please join us on [Transparency-Dev Slack](https://tran
 
 ## Overview
 
-The core idea is basically to construct an index like you would find in the back of a book, i.e. search terms are mapped to a _pointer_ to where the data can be found.
-A verifiable index represents an efficient data structure to allow point lookups to common queries over a single log.
-For example, a verifiable index over a module/package repository could be constructed to allow efficient lookup of all modules/packages with a given name.
+### The Problem: Verifiability vs. Efficiency
 
-The result of looking up a key in a verifiable index is a list of uint64 pointers to the origin log, i.e. a list of indices in the origin log where the leaf data matches the index function.
-The index has a checkpoint that commits to its state at any particular log size.
-Every point lookup (i.e. query) in the map is verifiable, as is the construction of the index itself.
-The verifiable index commits to all evolutions of its state by committing to all published index roots in a witnessed output log.
+Logs, such as those used in Certificate Transparency or Software Supply Chains, provide a strong foundation for discoverability. You can prove that an entry exists in a log. However, they lack a critical feature: the ability to _verifiably_ query for entries based on their content.
+
+This forces users who need to find specific data, like a domain owner finding their certificates, or a developer finding their software packages, into a painful choice:
+
+1.  **Massive Inefficiency**: Download and process the _entire_ log, which can be terabytes of mostly irrelevant data, just to find the few entries that matter to you.
+2.  **Losing Verifiability**: Rely on a third-party service to index the data. This breaks the chain of verifiability, as the index operator could, by accident or design, fail to show you all the results. You are forced to trust them.
+
+Neither option is acceptable. Users should not have to sacrifice efficiency for security, or security for efficiency.
+
+### The Solution: A Verifiable "Back-of-the-Book" Index
+
+A Verifiable Index resolves this conflict by providing a third option: an efficient, cryptographically verifiable way to query log data.
+
+At its core it works like a familiar index, much like one would find in the back of a book. It maps search terms (like a domain or package name) to the exact locations (pointers) in the main log where that data can be found.
+
+This provides two key guarantees:
+
+-   **Efficiency**: Users can look up data by a meaningful key and receive a small, targeted list of pointers back, avoiding the need to download the entire log.
+-   **Verifiability**: Every lookup response comes with a cryptographic proof. This proof guarantees that the list of results is complete and that the index operator has not omitted any entries for your query.
+
+The result is a system that extends the verifiability of the underlying log to its queries, preserving the end-to-end chain of trust while providing the efficiency modern systems require.
 
 ## Applications
 
@@ -186,14 +201,17 @@ You will also have a WAL file at `~/sumdb.wal`, which will make future boots fas
 |  #  | Step                                                      | Status |
 | :-: | --------------------------------------------------------- | :----: |
 |  1  | Public code base and documentation for prototype          |   ✅   |
-|  2  | Implementation of Merkle Radix Tree                       |   ✅   |
+|  2  | Implementation of in-memory Merkle Radix Tree             |   ✅   |
 |  3  | Incremental update                                        |   ✅   |
 |  4  | Example written for mapping SumDB                         |   ✅   |
-|  5  | Example written for mapping CT                            |   ⚠️   |
+|  5  | Proofs served on Lookup                                   |   ❌   |
 |  6  | Output log                                                |   ❌   |
-|  7  | Proofs served on Lookup                                   |   ❌   |
-|  8  | MapFn defined in WASM                                     |   ❌   |
-|  9  | Proper repository for this code to live long-term         |   ❌   |
-|  10 | Support reading directly from Input Log instead of Clone  |   ❌   |
+|  7  | Storage backed verifiable-map                             |   ❌   |
+|  8  | Example written for mapping CT                            |   ⚠️   |
+|  9  | MapFn defined in WASM                                     |   ❌   |
+|  10 | Proper repository for this code to live long-term         |   ❌   |
+|  11 | Support reading directly from Input Log instead of Clone  |   ❌   |
 |  N  | Production ready                                          |   ❌   |
 
+
+Note that a storage-backed map needs to be implemented before this can be applied to larger logs, e.g. CT.
