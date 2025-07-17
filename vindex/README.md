@@ -24,7 +24,7 @@ Neither option is acceptable. Users should not have to sacrifice efficiency for 
 
 A Verifiable Index resolves this conflict by providing a third option: an efficient, cryptographically verifiable way to query log data without compromise.
 
-At its core, it works like a familiar back-of-the-book index. It maps search terms (like a domain or package name) to the exact locations (pointers) in the main log where that data can be found.
+At its core it works like a familiar index, much like one would find in the back of a book. It maps search terms (like a domain or package name) to the exact locations (pointers) in the main log where that data can be found.
 
 This provides two key guarantees:
 
