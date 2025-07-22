@@ -51,7 +51,7 @@ func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("invalid hex hash: %v", err), http.StatusBadRequest)
 		return
 	}
-	if len(h) != sha256.Size {
+	if l := len(h); l != sha256.Size {
 		http.Error(w, fmt.Sprintf("hash wrong length (decoded %d bytes)", len(h)), http.StatusBadRequest)
 		return
 	}
