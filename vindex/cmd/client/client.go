@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -34,7 +35,7 @@ import (
 
 var (
 	baseURL = flag.String("base_url", "", "The base URL of the vindex server.")
-	key     = flag.String("key", "", "The key to look up in the vindex.")
+	lookup  = flag.String("lookup", "", "The key to look up in the vindex.")
 )
 
 func main() {
@@ -48,13 +49,13 @@ func main() {
 func run(ctx context.Context) error {
 	c := newVIndexClientFromFlags()
 
-	if *key == "" {
-		klog.Exit("key flag must be provided")
+	if *lookup == "" {
+		return errors.New("key flag must be provided")
 	}
 
-	resp, err := c.Lookup(ctx, *key)
+	resp, err := c.Lookup(ctx, *lookup)
 	if err != nil {
-		return fmt.Errorf("lookup for %q failed: %v", *key, err)
+		return fmt.Errorf("lookup for %q failed: %v", *lookup, err)
 	}
 
 	// For now, pretty print the JSON response
@@ -64,8 +65,8 @@ func run(ctx context.Context) error {
 	}
 	fmt.Println(string(jsonResp))
 
-	// This needs to verify the proofs in the response
-	// We can't verify inclusion with the info we currently have
+	// This needs to verify the proofs in the response.
+	// We can't verify inclusion with the info we currently have.
 	// We at least need the index of the leaf returned. We could add
 	// that to the response object, but this is kinda rfc6962.
 	// What would it look like if the output log is tiled? What should

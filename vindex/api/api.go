@@ -19,8 +19,9 @@ import "crypto/sha256"
 
 const (
 	// PathLookup defines the path from the vindex base URL where the lookup
-	// operation will be served. This takes a single key as a GET request
-	// parameter, and returns a marshalled LookupResponse.
+	// operation will be served. This should be constructed by appending a
+	// hex encoded hash to look up, and the server returns a marshalled
+	// LookupResponse.
 	PathLookup = "/lookup/"
 )
 

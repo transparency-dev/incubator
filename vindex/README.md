@@ -211,7 +211,7 @@ Use left/right cursor to browse, and `q` to quit.
 This log is processed into a verifiable map which can be looked up using the following command:
 
 ```shell
-go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --key=foo
+go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --lookup=foo
 ```
 
 ## Milestones
