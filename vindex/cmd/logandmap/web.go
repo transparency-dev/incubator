@@ -15,75 +15,63 @@
 package main
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"html/template"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/transparency-dev/incubator/vindex/api"
 	"k8s.io/klog/v2"
 )
 
-// Define a struct to hold any data we might pass to the template
-type FormData struct {
-	Message string
-}
-
-var (
-	//go:embed templates/form.html
-	templateStr string
-	tmpl        = template.Must(template.New("form").Parse(templateStr))
-)
-
-func NewServer(lookup func(string) string) Server {
+func NewServer(lookup func([sha256.Size]byte) ([]uint64, error)) Server {
 	return Server{
 		lookup: lookup,
 	}
 }
 
 type Server struct {
-	lookup func(string) string
+	lookup func([sha256.Size]byte) ([]uint64, error)
 }
 
-// serveForm handles GET requests to the root path ("/")
-// It renders the HTML form.
-func (s Server) serveForm(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Render the form template with no initial data
-	err := tmpl.Execute(w, FormData{Message: "Enter your string below:"})
-	if err != nil {
-		klog.Warningf("Error executing template: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-	}
-}
-
-// handleLookup handles POST requests for looking up map entries.
-// It parses the form data and responds.
+// handleLookup handles GET requests for looking up map entries.
 func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	vars := mux.Vars(r)
+	hashStr, ok := vars["hash"]
+	if !ok {
+		http.Error(w, "hash parameter not found", http.StatusBadRequest)
 		return
 	}
 
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, fmt.Sprintf("Error parsing form: %v", err), http.StatusBadRequest)
+	h, err := hex.DecodeString(hashStr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid hex hash: %v", err), http.StatusBadRequest)
 		return
 	}
-	inputString := r.FormValue("inputString")
+	if l := len(h); l != sha256.Size {
+		http.Error(w, fmt.Sprintf("hash wrong length (decoded %d bytes)", l), http.StatusBadRequest)
+		return
+	}
 
-	klog.V(2).Infof("Received string from form: '%s'", inputString)
+	klog.V(2).Infof("Received hash from request: '%s'", h)
 
-	responseMessage := s.lookup(inputString)
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	idxes, err := s.lookup([sha256.Size]byte(h))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("lookup failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, responseMessage)
+	var resp api.LookupResponse
+	resp.IndexValue = idxes
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		klog.Warningf("failed to encode response: %v", err)
+	}
 }
 
 func (s Server) registerHandlers(r *mux.Router) {
-	r.HandleFunc("/vindex/", s.serveForm).Methods("GET")
-	r.HandleFunc("/vindex/lookup", s.handleLookup).Methods("POST")
+	r.HandleFunc("/vindex/lookup/{hash}", s.handleLookup).Methods("GET")
 }

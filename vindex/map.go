@@ -132,28 +132,27 @@ func (b *VerifiableIndex) Close() error {
 
 // Lookup returns the values stored for the given key.
 // TODO(mhutchinson): This needs to return verifiable stuff
-func (b *VerifiableIndex) Lookup(key string) (indices []uint64) {
+func (b *VerifiableIndex) Lookup(key [sha256.Size]byte) (indices []uint64, size uint64) {
 	// Scope the lock to be as minimal as possible
-	lookupLocked := func(key string) []uint64 {
+	lookupLocked := func(key [sha256.Size]byte) []uint64 {
 		b.indexMu.RLock()
 		defer b.indexMu.RUnlock()
-		kh := sha256.Sum256([]byte(key))
-		return b.data[kh]
+		return b.data[key]
 	}
 
 	// TODO(mhutchinson): this should come from the latest map root in the (witnessed) output log.
 	// This map root, the witnessed output log checkpoint, and all proofs should also be served here.
-	size := b.servingSize
+	size = b.servingSize
 
 	allIndices := lookupLocked(key)
 	for i, idx := range allIndices {
 		if idx >= size {
 			// If we have indices past the current size we are serving, drop them.
 			// Doing this allows us to update b.data with new indices while still serving from it.
-			return allIndices[:i]
+			return allIndices[:i], size
 		}
 	}
-	return allIndices
+	return allIndices, size
 }
 
 // Update checks the input log for a new Checkpoint, and ensures that the Verifiable Index
