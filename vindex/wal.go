@@ -27,12 +27,36 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func newWalWriter(walPath string) (*walWriter, uint64, error) {
+// newWalWriter creates a WAL writer that uses the file at the given path.
+// This will verify that the tail of the WAL file is well-formed, and truncate the file
+// if there is any trailing corruption. It will ensure that the file is truncated so that
+// the last index there is treeSize-1. This allows the WAL to be
+// flushed ahead of storing state about the input log merkle tree, and then slightly
+// truncated if the WAL ends up being ahead due to process termination.
+// If no entry for treeSize-1 can be found, then this returns an error.
+func newWalWriter(walPath string, treeSize uint64) (*walWriter, error) {
 	w := &walWriter{
 		walPath: walPath,
 	}
-	idx, err := w.init()
-	return w, idx, err
+	ffs := os.O_WRONLY | os.O_APPEND
+
+	var lastIndex uint64
+	if treeSize > 0 {
+		lastIndex = treeSize - 1
+	}
+	err := validate(walPath, lastIndex)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		ffs |= os.O_CREATE | os.O_EXCL
+	}
+	// Open the file for writing in append-only, creating it if needed
+	w.f, err = os.OpenFile(walPath, ffs, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file for writing: %s", err)
+	}
+	return w, err
 }
 
 // walWriter provides the methods needed by the processor of the Input Log when interacting
@@ -43,32 +67,6 @@ type walWriter struct {
 	f       *os.File
 }
 
-// init verifies that the log is in good shape, and returns the index that is expected next.
-// It also opens the log for appending to.
-//
-// Note that it returns the next expected index to avoid awkwardness with the meaning of 0,
-// which could mean 0 was successfully read from a previous run, or that there was no log.
-func (l *walWriter) init() (uint64, error) {
-	ffs := os.O_WRONLY | os.O_APPEND
-
-	idx, err := validate(l.walPath)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return idx, err
-		}
-		ffs |= os.O_CREATE | os.O_EXCL
-	} else {
-		// If the file exists, then we expect the next index to be returned
-		idx++
-	}
-	// Open the file for writing in append-only, creating it if needed
-	l.f, err = os.OpenFile(l.walPath, ffs, 0o644)
-	if err != nil {
-		return 0, fmt.Errorf("failed to open file for writing: %s", err)
-	}
-	return idx, err
-}
-
 func (l *walWriter) close() error {
 	return l.f.Close()
 }
@@ -76,26 +74,26 @@ func (l *walWriter) close() error {
 // validate reads the file and determines what the last mapped log index was, and returns it.
 // The assumption is that all lines ending with a newline were written correctly.
 // If there are any errors in the file then this throws an error.
-func validate(walPath string) (uint64, error) {
+func validate(walPath string, lastIdx uint64) error {
 	f, err := os.OpenFile(walPath, os.O_RDWR, 0o644)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer func() {
 		_ = f.Close()
 	}()
 	fi, err := f.Stat()
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	// Handle trivial case of empty file
-	size := fi.Size()
-	if size == 0 {
+	fileSize := fi.Size()
+	if fileSize == 0 {
 		if err := os.Remove(walPath); err != nil {
-			return 0, fmt.Errorf("failed to delete empty file: %s", err)
+			return fmt.Errorf("failed to delete empty file: %s", err)
 		}
-		return 0, os.ErrNotExist
+		return os.ErrNotExist
 	}
 
 	// Read from the end of the file in stripes, terminating when we either:
@@ -104,7 +102,7 @@ func validate(walPath string) (uint64, error) {
 	var buffer string
 	const stripeSize = 1024
 	readStripe := make([]byte, stripeSize)
-	seekPos := size - stripeSize
+	seekPos := fileSize - stripeSize
 	droppedTail := false
 
 	for {
@@ -115,9 +113,19 @@ func validate(walPath string) (uint64, error) {
 			seekPos = 0
 		}
 		if _, err := f.ReadAt(readStripe, seekPos); err != nil {
-			return 0, err
+			return err
 		}
 		buffer = string(readStripe) + buffer
+
+		var truncFrom int64 = -1
+		defer func() {
+			if truncFrom >= 0 {
+				klog.Warningf("Dropping trailing %d bytes from WAL", fileSize-truncFrom)
+				if err := f.Truncate(truncFrom); err != nil {
+					panic(fmt.Errorf("failed to truncate WAL: %v", err))
+				}
+			}
+		}()
 
 		for i := strings.LastIndex(buffer, "\n"); i > 0; i = strings.LastIndex(buffer, "\n") {
 			p := buffer[i+1:]
@@ -125,23 +133,33 @@ func validate(walPath string) (uint64, error) {
 			if !droppedTail {
 				droppedTail = true
 				if len(p) > 0 {
-					truncPos := seekPos + int64(i) + 1
-					klog.Warningf("Dropping tail part from WAL: %q", p)
-					if err := f.Truncate(truncPos); err != nil {
-						return 0, fmt.Errorf("failed to truncate WAL: %v", err)
-					}
+					truncFrom = seekPos + int64(i) + 1
 				}
 				continue
 			}
 			idx, _, err := unmarshalWalEntry(p)
-			return idx, err
+			if err != nil {
+				return err
+			}
+			switch {
+			case idx > lastIdx:
+				truncFrom = seekPos + int64(i) + 1
+			case idx == lastIdx:
+				return nil
+			case idx < lastIdx:
+				return fmt.Errorf("failed to find index %d (terminated after rewinding to %d)", lastIdx, idx)
+			}
 		}
 		if seekPos == 0 {
-			idx, _, err := unmarshalWalEntry(buffer)
-			return idx, err
+			_, _, err := unmarshalWalEntry(buffer)
+			return err
 		}
 		seekPos = seekPos - stripeSize
 	}
+}
+
+func (l *walWriter) flush() error {
+	return l.f.Sync()
 }
 
 func (l *walWriter) append(idx uint64, hashes [][32]byte) error {

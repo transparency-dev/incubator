@@ -19,19 +19,32 @@
 package vindex
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"iter"
+	"os"
+	"path"
+	"strconv"
 	"sync"
 	"time"
 
 	"filippo.io/torchwood/mpt"
+	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
-	"golang.org/x/sync/errgroup"
+	"github.com/transparency-dev/merkle/compact"
+	"github.com/transparency-dev/merkle/rfc6962"
 	"k8s.io/klog/v2"
+)
+
+const (
+	db_latestCheckpointKey = "latestCheckpoint"
+	db_compactRangeKey     = "compactRange"
+	db_compactRangeSizeKey = "compactRangeSize"
 )
 
 // MapFn takes the raw leaf data from a log entry and outputs the SHA256 hashes
@@ -65,8 +78,59 @@ type OpenCheckpointFn func(cpRaw []byte) (*log.Checkpoint, error)
 // path.
 // Note that only one IndexBuilder should exist for any given walPath at any time. The behaviour is unspecified,
 // but likely broken, if multiple processes are writing to the same file at any given time.
-func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn OpenCheckpointFn, mapFn MapFn, walPath string) (*VerifiableIndex, error) {
-	wal, ws, err := newWalWriter(walPath)
+func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn OpenCheckpointFn, mapFn MapFn, rootDir string) (*VerifiableIndex, error) {
+	stateDir := path.Join(rootDir, "state")
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return nil, err
+	}
+	db, err := pebble.Open(stateDir, &pebble.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("pebble.Open(): %v", err)
+	}
+
+	// Helpful wrapper to convert Closer to something that can be safely deferred (according to the linter)
+	logClose := func(c io.Closer) {
+		if err := c.Close(); err != nil {
+			klog.Error(err)
+		}
+	}
+
+	// Load the compact range we have calculated so far, and the size persisted. We MUST start
+	// from this index in order to have properly verified the state of the input log.
+	crf := compact.RangeFactory{Hash: rfc6962.DefaultHasher.HashChildren}
+	var cr *compact.Range
+	var size uint64
+	snap := db.NewSnapshot()
+	defer logClose(snap)
+
+	if sizeBs, sizeCloser, err := snap.Get([]byte(db_compactRangeSizeKey)); err != nil {
+		if err != pebble.ErrNotFound {
+			return nil, fmt.Errorf("pebble.Get(): %v", err)
+		}
+		size = 0
+		cr = crf.NewEmptyRange(0)
+	} else {
+		crBs, crCloser, err := snap.Get([]byte(db_compactRangeKey))
+		if err != nil {
+			return nil, fmt.Errorf("pebble.Get(): %v", err)
+		}
+		defer logClose(crCloser)
+		defer logClose(sizeCloser)
+
+		size = binary.BigEndian.Uint64(sizeBs)
+		crHashes := make([][]byte, len(crBs)/sha256.Size)
+		for i := range crHashes {
+			crHashes[i] = crBs[i*sha256.Size : (i+1)*sha256.Size]
+		}
+		klog.Infof("Loaded state: size=%d, hashes=%d", size, len(crHashes))
+		cr, err = crf.NewRange(0, size, crHashes)
+		if err != nil {
+			return nil, fmt.Errorf("NewRange: %v", err)
+		}
+	}
+
+	walPath := path.Join(rootDir, "map.wal")
+	wal, err := newWalWriter(walPath, size)
 	if err != nil {
 		return nil, err
 	}
@@ -83,15 +147,17 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn 
 		inputLogParseFn: inputLogParseFn,
 		mapFn:           mapFn,
 		walWriter:       wal,
-		nextIndex:       ws,
+		db:              db,
+		r:               cr,
 	}
 	b := &VerifiableIndex{
 		mapper:    mapper,
 		walReader: reader,
+		db:        db,
 		vindex:    *mpt.NewTree(sha256.Sum256, vtreeStorage),
 		data:      map[[32]byte][]uint64{},
 	}
-	if err := b.buildMap(ctx, ws); err != nil {
+	if err := b.buildMap(ctx); err != nil {
 		return nil, fmt.Errorf("failed to build map: %v", err)
 	}
 	return b, nil
@@ -104,34 +170,13 @@ type inputLogMapper struct {
 	inputLogParseFn OpenCheckpointFn
 	mapFn           MapFn
 	walWriter       *walWriter
+	db              *pebble.DB
 
-	nextIndex      uint64 // nextIndex is the next index in the log to consume
-	inputLogCpSize uint64 // cpSize is the tree size of rawCp. Used to sync on WAL.
+	r *compact.Range
 }
 
 func (m *inputLogMapper) close() error {
 	return m.walWriter.close()
-}
-
-// available returns whether this is work to do.
-// TODO(mhutchinson): this can probably be deleted
-func (m *inputLogMapper) available(ctx context.Context) bool {
-	rawCp, err := m.inputLog.Checkpoint(ctx)
-	if err != nil {
-		klog.Warningf("Failed to get latest checkpoint from DB: %s", err)
-		return false
-	}
-	cp, err := m.inputLogParseFn(rawCp)
-	if err != nil {
-		klog.Warningf("Failed to parse checkpoint: %s", err)
-		return false
-	}
-
-	// TODO(mhutchinson): remove this and replace with disk persistence?
-	defer func() {
-		m.inputLogCpSize = cp.Size
-	}()
-	return cp.Size > m.inputLogCpSize
 }
 
 // syncFromInputLog reads the latest checkpoint from the input log, and ensures that the WAL
@@ -142,13 +187,29 @@ func (m *inputLogMapper) available(ctx context.Context) bool {
 // cloneDB, which performed this validation. Implementing this will require the index to store some
 // state alongside the WAL which contains a compact range of its current progress.
 func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
-	if m.inputLogCpSize > m.nextIndex {
+	rawCp, err := m.inputLog.Checkpoint(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get latest checkpoint from DB: %s", err)
+	}
+	cp, err := m.inputLogParseFn(rawCp)
+	if err != nil {
+		return fmt.Errorf("failed to parse checkpoint: %s", err)
+	}
+
+	if m.r.End() < cp.Size {
 		ctx, done := context.WithCancel(ctx)
 		defer done()
-		for l, err := range m.inputLog.Leaves(ctx, m.nextIndex, m.inputLogCpSize) {
-			idx := m.nextIndex
+		for l, err := range m.inputLog.Leaves(ctx, m.r.End(), cp.Size) {
+			idx := m.r.End()
 			if err != nil {
 				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
+			}
+			if idx >= cp.Size {
+				return fmt.Errorf("expected stop at cp.Size=%d, but got leaf at index=%d", cp.Size, idx)
+			}
+
+			if err := m.r.Append(rfc6962.DefaultHasher.HashLeaf(l), nil); err != nil {
+				return fmt.Errorf("failed to update compact range: %v", err)
 			}
 
 			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
@@ -166,8 +227,9 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 			if mapErr != nil {
 				return mapErr
 			}
-			m.nextIndex++
-			if len(hashes) == 0 && idx < m.inputLogCpSize-1 {
+
+			storeCompactRange := m.r.End()%256 == 0 || m.r.End() == cp.Size
+			if len(hashes) == 0 && !storeCompactRange {
 				// We can skip writing out values with no hashes, as long as we're
 				// not at the end of the log.
 				// If we are at the end of the log, we need to write out a value as a sentinel
@@ -177,7 +239,53 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 			if err := m.walWriter.append(idx, hashes); err != nil {
 				return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
 			}
+			if storeCompactRange {
+				// Periodically store the validated compact range consumed so far.
+				// The choice to align with every 256 entries is an implicit bias towards
+				// supporting tlog-tiles.
+				if err := m.walWriter.flush(); err != nil {
+					return fmt.Errorf("failed to flush the WAL: %v", err)
+				}
+				if err := m.storeState(); err != nil {
+					return fmt.Errorf("failed to store incremental state: %v", err)
+				}
+			}
 		}
+	}
+	if err := m.walWriter.flush(); err != nil {
+		return fmt.Errorf("failed to flush: %v", err)
+	}
+
+	// Calculate the root hash, and if it checks out, store the checkpoint to indicate safety.
+	hash, err := m.r.GetRootHash(nil)
+	if err != nil {
+		return fmt.Errorf("failed to get root hash from compact range: %v", err)
+	}
+	if !bytes.Equal(hash, cp.Hash) {
+		return fmt.Errorf("calculated hash for tree size %d is %x, but checkpoint commits to %x", cp.Size, hash, cp.Hash)
+	}
+	if err := m.db.Set([]byte(db_latestCheckpointKey), rawCp, pebble.Sync); err != nil {
+		return fmt.Errorf("failed to update state: %v", err)
+	}
+
+	klog.Infof("synced WAL to size %d", cp.Size)
+	return nil
+}
+
+func (m *inputLogMapper) storeState() error {
+	flatSlice := make([]byte, len(m.r.Hashes())*32)
+	for i, arr := range m.r.Hashes() {
+		copy(flatSlice[i*32:], arr[:])
+	}
+	b := m.db.NewBatch()
+	if err := b.Set([]byte(db_compactRangeKey), flatSlice, pebble.Sync); err != nil {
+		return fmt.Errorf("failed to update state: %v", err)
+	}
+	if err := b.Set([]byte(db_compactRangeSizeKey), binary.BigEndian.AppendUint64(nil, m.r.End()), pebble.Sync); err != nil {
+		return fmt.Errorf("failed to update state: %v", err)
+	}
+	if err := m.db.Apply(b, pebble.Sync); err != nil {
+		return fmt.Errorf("failed to update state: %v", err)
 	}
 	return nil
 }
@@ -187,6 +295,7 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 type VerifiableIndex struct {
 	mapper    *inputLogMapper
 	walReader *walReader
+	db        *pebble.DB
 
 	indexMu sync.RWMutex // covers vindex and data
 	vindex  mpt.Tree
@@ -231,27 +340,36 @@ func (b *VerifiableIndex) Lookup(key [sha256.Size]byte) (indices []uint64, size 
 // Update checks the input log for a new Checkpoint, and ensures that the Verifiable Index
 // is updated to the corresponding size.
 func (b *VerifiableIndex) Update(ctx context.Context) error {
-	if !b.mapper.available(ctx) {
-		return nil
+	// TODO(mhutchinson): look for options to improve concurrency again here.
+	if err := b.mapper.syncFromInputLog(ctx); err != nil {
+		return err
 	}
-
-	newSize := b.mapper.inputLogCpSize
-	eg, cctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return b.mapper.syncFromInputLog(cctx) })
-	eg.Go(func() error { return b.buildMap(cctx, newSize) })
-
-	err := eg.Wait()
-
-	return err
+	return b.buildMap(ctx)
 }
 
 // buildMap reads from the WAL until the file has been consumed and the map has been
 // built up the provided size.
-func (b *VerifiableIndex) buildMap(ctx context.Context, toSize uint64) error {
+func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	startWal := time.Now()
 	updatedKeys := make(map[[32]byte]bool) // Allows us to efficiently update vindex after first init
 
-	for i := b.servingSize; i < toSize; {
+	cpRaw, closer, err := b.db.Get([]byte(db_latestCheckpointKey))
+	if err != nil {
+		if err == pebble.ErrNotFound {
+			// If the key isn't there then nothing to do.
+			return nil
+		}
+		return fmt.Errorf("failed to read latest checkpoint: %v", err)
+	}
+	if err := closer.Close(); err != nil {
+		return fmt.Errorf("failed to close: %v", err)
+	}
+	_, size, _, err := checkpointUnsafe(cpRaw)
+	if err != nil {
+		return fmt.Errorf("failed to parse checkpoint: %v", err)
+	}
+
+	for i := b.servingSize; i < size; {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -320,7 +438,33 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, toSize uint64) error {
 	durationVIndex := time.Since(startVIndex)
 	durationTotal := time.Since(startWal)
 
-	b.servingSize = toSize
+	b.servingSize = size
 	klog.Infof("buildMap: total=%s (wal=%s, vindex=%s)", durationTotal, durationWal, durationVIndex)
 	return nil
+}
+
+// checkpointUnsafe parses a checkpoint without performing any signature verification.
+// This is intended to be as fast as possible, but sacrifices safety because it skips verifying
+// the note signature.
+//
+// Parsing a checkpoint like this is only acceptable in a process where the checkpoint has already
+// been verified properly, and hasn't left the TCB since being checked. In this code, the on-disk
+// storage is considered to be in the TCB, and thus we can skip fully verify it a second time.
+func checkpointUnsafe(rawCp []byte) (string, uint64, []byte, error) {
+	parts := bytes.SplitN(rawCp, []byte{'\n'}, 4)
+	if want, got := 4, len(parts); want != got {
+		return "", 0, nil, fmt.Errorf("invalid checkpoint: %q", rawCp)
+	}
+	origin := string(parts[0])
+	sizeStr := string(parts[1])
+	hashStr := string(parts[2])
+	size, err := strconv.ParseUint(sizeStr, 10, 64)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("failed to turn checkpoint size of %q into uint64: %v", sizeStr, err)
+	}
+	hash, err := base64.StdEncoding.DecodeString(hashStr)
+	if err != nil {
+		return "", 0, nil, fmt.Errorf("failed to decode hash: %v", err)
+	}
+	return origin, size, hash, nil
 }

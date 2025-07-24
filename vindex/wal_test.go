@@ -82,19 +82,16 @@ func TestWriteAheadLog_init(t *testing.T) {
 			if err := f.Close(); err != nil {
 				t.Fatal(err)
 			}
-			wal, idx, err := newWalWriter(f.Name())
-			defer func() {
-				_ = wal.close()
-			}()
+			wal, err := newWalWriter(f.Name(), 0)
 			if gotErr := err != nil; gotErr != tC.wantErr {
 				t.Fatalf("wantErr != gotErr (%t != %t) %v", tC.wantErr, gotErr, err)
 			}
 			if tC.wantErr {
 				return
 			}
-			if idx != tC.wantIdx {
-				t.Errorf("want idx %v but got %v", tC.wantIdx, idx)
-			}
+			defer func() {
+				_ = wal.close()
+			}()
 		})
 	}
 }
@@ -110,16 +107,13 @@ func TestWriteAheadLog_truncate(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	wal, idx, err := newWalWriter(f.Name())
+	wal, err := newWalWriter(f.Name(), 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
 		_ = wal.close()
 	}()
-	if got, want := idx, uint64(3); got != want {
-		t.Errorf("expected next index %d, but got %d", want, got)
-	}
 
 	contents, err := os.ReadFile(f.Name())
 	if err != nil {
@@ -131,46 +125,84 @@ func TestWriteAheadLog_truncate(t *testing.T) {
 }
 
 func TestWriteAheadLog_roundtrip(t *testing.T) {
-	f, err := os.CreateTemp("", "testWal")
-	if err != nil {
-		t.Fatal(err)
+	testCases := []struct {
+		desc           string
+		entriesToWrite uint64
+		treeSizeNeeded uint64
+		wantErr        bool
+	}{
+		{
+			desc:           "write 2, read 2",
+			entriesToWrite: 2,
+			treeSizeNeeded: 2,
+			wantErr:        false,
+		}, {
+			desc:           "write 200, read 200",
+			entriesToWrite: 200,
+			treeSizeNeeded: 200,
+			wantErr:        false,
+		}, {
+			desc:           "write 50, read 20",
+			entriesToWrite: 50,
+			treeSizeNeeded: 20,
+			wantErr:        false,
+		},
 	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(f.Name()); err != nil {
-		t.Fatal(err)
-	}
+	for _, tC := range testCases {
+		t.Run(tC.desc, func(t *testing.T) {
+			f, err := os.CreateTemp("", "testWal")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(f.Name()); err != nil {
+				t.Fatal(err)
+			}
 
-	wal, idx, err := newWalWriter(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := idx, uint64(0); got != want {
-		t.Fatalf("expected index %d, got %d", want, got)
-	}
+			wal, err := newWalWriter(f.Name(), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	for i := range 33 {
-		hash := sha256.Sum256([]byte{byte(i)})
-		if err := wal.append(uint64(i), [][32]byte{hash}); err != nil {
-			t.Error(err)
-		}
-	}
+			for i := range tC.entriesToWrite {
+				hash := sha256.Sum256([]byte{byte(i)})
+				if err := wal.append(uint64(i), [][32]byte{hash}); err != nil {
+					t.Error(err)
+				}
+			}
 
-	if err := wal.close(); err != nil {
-		t.Error(err)
-	}
+			if err := wal.close(); err != nil {
+				t.Error(err)
+			}
 
-	wal, idx, err = newWalWriter(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := idx, uint64(33); got != want {
-		t.Fatalf("expected index %d, got %d", want, got)
-	}
+			wal, err = newWalWriter(f.Name(), tC.treeSizeNeeded)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	if err := wal.close(); err != nil {
-		t.Error(err)
+			if err := wal.close(); err != nil {
+				t.Error(err)
+			}
+
+			wr, err := newWalReader(f.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var lastIdx uint64
+			for {
+				if idx, _, err := wr.next(); err != nil {
+					break
+				} else {
+					lastIdx = idx
+				}
+			}
+			if got, want := lastIdx, tC.treeSizeNeeded-1; got != want {
+				t.Errorf("expected reader to have last index of %d, but found %d", want, got)
+			}
+		})
 	}
 }
 
@@ -186,12 +218,9 @@ func TestWriteAndWriteLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wal, idx, err := newWalWriter(f.Name())
+	wal, err := newWalWriter(f.Name(), 0)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got, want := idx, uint64(0); got != want {
-		t.Fatalf("expected index %d, got %d", want, got)
 	}
 
 	reader, err := newWalReader(f.Name())
