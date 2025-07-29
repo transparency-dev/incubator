@@ -53,12 +53,11 @@ type MapFn func([]byte) [][32]byte
 // InputLog represents a connection to the input log from which map data will be built.
 // This can be a local or remote data source.
 type InputLog interface {
-	// GetCheckpoint returns the latest checkpoint committing to the input log state.
-	GetCheckpoint(ctx context.Context) (checkpoint []byte, err error)
-	// StreamLeaves returns all the leaves in the range [start, end), outputting them via
-	// the out channel.
-	// TODO(mhutchinson): This out channel would be better as a returned iterator.
-	StreamLeaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error]
+	// Checkpoint returns the latest checkpoint committing to the input log state.
+	Checkpoint(ctx context.Context) (checkpoint []byte, err error)
+	// Leaves returns all the leaves in the range [start, end), outputting them via
+	// the returned iterator.
+	Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error]
 }
 
 // OpenCheckpointFn is a function that parses a checkpoint, validating it, and returns a parsed
@@ -72,15 +71,15 @@ type OpenCheckpointFn func(cpRaw []byte) (*log.Checkpoint, error)
 // path.
 // Note that only one IndexBuilder should exist for any given walPath at any time. The behaviour is unspecified,
 // but likely broken, if multiple processes are writing to the same file at any given time.
-func NewVerifiableIndex(ctx context.Context, inputLog InputLog, logParseFn OpenCheckpointFn, mapFn MapFn, walPath string) (*VerifiableIndex, error) {
-	wal := &writeAheadLog{
+func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn OpenCheckpointFn, mapFn MapFn, walPath string) (*VerifiableIndex, error) {
+	wal := &walWriter{
 		walPath: walPath,
 	}
 	ws, err := wal.init()
 	if err != nil {
 		return nil, err
 	}
-	reader, err := newLogReader(walPath)
+	reader, err := newWalReader(walPath)
 	if err != nil {
 		return nil, err
 	}
@@ -88,36 +87,119 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, logParseFn OpenC
 	if err := mpt.InitStorage(sha256.Sum256, vtreeStorage); err != nil {
 		return nil, fmt.Errorf("InitStorage: %s", err)
 	}
+	mapper := &inputLogMapper{
+		inputLog:        inputLog,
+		inputLogParseFn: inputLogParseFn,
+		mapFn:           mapFn,
+		walWriter:       wal,
+		nextIndex:       ws,
+	}
 	b := &VerifiableIndex{
-		inputLog:   inputLog,
-		logParseFn: logParseFn,
-		mapFn:      mapFn,
-		wal:        wal,
-		reader:     reader,
-		vindex:     *mpt.NewTree(sha256.Sum256, vtreeStorage),
-		data:       map[[32]byte][]uint64{},
-		nextIndex:  ws,
+		mapper:    mapper,
+		walReader: reader,
+		vindex:    *mpt.NewTree(sha256.Sum256, vtreeStorage),
+		data:      map[[32]byte][]uint64{},
+	}
+	if err := b.buildMap(ctx, ws); err != nil {
+		return nil, fmt.Errorf("failed to build map: %v", err)
 	}
 	return b, nil
+}
+
+// inputLogMapper reads the Input Log, checking that the data matches the commitments,
+// and updates the WAL and DB with the resulting information.
+type inputLogMapper struct {
+	inputLog        InputLog
+	inputLogParseFn OpenCheckpointFn
+	mapFn           MapFn
+	walWriter       *walWriter
+
+	nextIndex      uint64 // nextIndex is the next index in the log to consume
+	inputLogCpSize uint64 // cpSize is the tree size of rawCp. Used to sync on WAL.
+}
+
+func (m *inputLogMapper) close() error {
+	return m.walWriter.close()
+}
+
+// available returns whether this is work to do.
+// TODO(mhutchinson): this can probably be deleted
+func (m *inputLogMapper) available(ctx context.Context) bool {
+	rawCp, err := m.inputLog.Checkpoint(ctx)
+	if err != nil {
+		klog.Warningf("Failed to get latest checkpoint from DB: %s", err)
+		return false
+	}
+	cp, err := m.inputLogParseFn(rawCp)
+	if err != nil {
+		klog.Warningf("Failed to parse checkpoint: %s", err)
+		return false
+	}
+
+	// TODO(mhutchinson): remove this and replace with disk persistence?
+	defer func() {
+		m.inputLogCpSize = cp.Size
+	}()
+	return cp.Size > m.inputLogCpSize
+}
+
+// syncFromInputLog reads the latest checkpoint from the input log, and ensures that the WAL
+// contains a corresponding entry for every index committed to by that checkpoint.
+//
+// TODO(mhutchinson): this doesn't perform any validation on the input log to check the
+// leaves correspond to the checkpoint root hash. This was reasonable while it was based on the
+// cloneDB, which performed this validation. Implementing this will require the index to store some
+// state alongside the WAL which contains a compact range of its current progress.
+func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
+	if m.inputLogCpSize > m.nextIndex {
+		ctx, done := context.WithCancel(ctx)
+		defer done()
+		for l, err := range m.inputLog.Leaves(ctx, m.nextIndex, m.inputLogCpSize) {
+			idx := m.nextIndex
+			if err != nil {
+				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
+			}
+
+			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
+			// and failing gracefully.
+			var hashes [][32]byte
+			var mapErr error
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						mapErr = fmt.Errorf("panic detected mapping index %d: %s", idx, r)
+					}
+				}()
+				hashes = m.mapFn(l)
+			}()
+			if mapErr != nil {
+				return mapErr
+			}
+			m.nextIndex++
+			if len(hashes) == 0 && idx < m.inputLogCpSize-1 {
+				// We can skip writing out values with no hashes, as long as we're
+				// not at the end of the log.
+				// If we are at the end of the log, we need to write out a value as a sentinel
+				// even if there are no hashes.
+				continue
+			}
+			if err := m.walWriter.append(idx, hashes); err != nil {
+				return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
+			}
+		}
+	}
+	return nil
 }
 
 // VerifiableIndex manages reading from the input log, mapping leaves, updating the WAL,
 // reading the WAL, and keeping the state of the in-memory index updated from the WAL.
 type VerifiableIndex struct {
-	inputLog   InputLog
-	logParseFn OpenCheckpointFn
-	mapFn      MapFn
-	wal        *writeAheadLog
-	reader     *logReader
+	mapper    *inputLogMapper
+	walReader *walReader
 
 	indexMu sync.RWMutex // covers vindex and data
 	vindex  mpt.Tree
 	data    map[[32]byte][]uint64
-
-	nextIndex uint64 // nextIndex is the next index in the log to consume
-	rawCp     []byte // rawCp is the last checkpoint we started syncing to
-	cpSize    uint64 // cpSize is the tree size of rawCp
-	mapSize   uint64 // mapSize is the total number of leaves processed into the map
 
 	// servingSize is the size of the input log we are serving for.
 	// This a temporary workaround not having an output log, which we will eventually read to get
@@ -127,7 +209,7 @@ type VerifiableIndex struct {
 
 // Close ensures that any open connections are closed before returning.
 func (b *VerifiableIndex) Close() error {
-	return b.wal.close()
+	return b.mapper.close()
 }
 
 // Lookup returns the values stored for the given key.
@@ -158,93 +240,33 @@ func (b *VerifiableIndex) Lookup(key [sha256.Size]byte) (indices []uint64, size 
 // Update checks the input log for a new Checkpoint, and ensures that the Verifiable Index
 // is updated to the corresponding size.
 func (b *VerifiableIndex) Update(ctx context.Context) error {
-	rawCp, err := b.inputLog.GetCheckpoint(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get latest checkpoint from DB: %s", err)
-	}
-	cp, err := b.logParseFn(rawCp)
-	if err != nil {
-		return fmt.Errorf("failed to parse checkpoint: %s", err)
-	}
-
-	if cp.Size == b.cpSize {
-		klog.V(1).Infof("No update needed: checkpoint size is still %d", b.servingSize)
+	if !b.mapper.available(ctx) {
 		return nil
 	}
-	b.cpSize = cp.Size
-	b.rawCp = rawCp
-	klog.Infof("Building map to log size of %d", b.cpSize)
 
+	newSize := b.mapper.inputLogCpSize
 	eg, cctx := errgroup.WithContext(ctx)
-	eg.Go(func() error { return b.syncFromInputLog(cctx) })
-	eg.Go(func() error { return b.buildMap(cctx) })
+	eg.Go(func() error { return b.mapper.syncFromInputLog(cctx) })
+	eg.Go(func() error { return b.buildMap(cctx, newSize) })
 
-	err = eg.Wait()
-	b.servingSize = b.cpSize
+	err := eg.Wait()
 
 	return err
 }
 
-// syncFromInputLog reads the latest checkpoint from the input log, and ensures that the WAL
-// contains a corresponding entry for every index committed to by that checkpoint.
-//
-// TODO(mhutchinson): this doesn't perform any validation on the input log to check the
-// leaves correspond to the checkpoint root hash. This was reasonable while it was based on the
-// cloneDB, which performed this validation. Implementing this will require the index to store some
-// state alongside the WAL which contains a compact range of its current progress.
-func (b *VerifiableIndex) syncFromInputLog(ctx context.Context) error {
-	if b.cpSize > b.nextIndex {
-		ctx, done := context.WithCancel(ctx)
-		defer done()
-		for l, err := range b.inputLog.StreamLeaves(ctx, b.nextIndex, b.cpSize) {
-			idx := b.nextIndex
-			if err != nil {
-				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
-			}
-
-			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
-			// and failing gracefully.
-			var hashes [][32]byte
-			var mapErr error
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						mapErr = fmt.Errorf("panic detected mapping index %d: %s", idx, r)
-					}
-				}()
-				hashes = b.mapFn(l)
-			}()
-			if mapErr != nil {
-				return mapErr
-			}
-			b.nextIndex++
-			if len(hashes) == 0 && idx < b.cpSize-1 {
-				// We can skip writing out values with no hashes, as long as we're
-				// not at the end of the log.
-				// If we are at the end of the log, we need to write out a value as a sentinel
-				// even if there are no hashes.
-				continue
-			}
-			if err := b.wal.append(idx, hashes); err != nil {
-				return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
-			}
-		}
-	}
-	return nil
-}
-
 // buildMap reads from the WAL until the file has been consumed and the map has been
-// built up the WAL size.
-func (b *VerifiableIndex) buildMap(ctx context.Context) error {
+// built up the provided size.
+func (b *VerifiableIndex) buildMap(ctx context.Context, toSize uint64) error {
 	startWal := time.Now()
 	updatedKeys := make(map[[32]byte]bool) // Allows us to efficiently update vindex after first init
-	for b.mapSize < b.cpSize {
+
+	for i := b.servingSize; i < toSize; {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
-		idx, hashes, err := b.reader.next()
+		idx, hashes, err := b.walReader.next()
 		if err != nil {
 			if err != io.EOF {
 				return err
@@ -260,7 +282,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 		func() {
 			b.indexMu.Lock()
 			defer b.indexMu.Unlock()
-			b.mapSize = idx + 1
+			i = idx + 1
 			for _, h := range hashes {
 				klog.V(2).Infof("Read from WAL: index %d: %x", idx, h)
 				// Add the data to the key/value map
@@ -307,11 +329,15 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	durationVIndex := time.Since(startVIndex)
 	durationTotal := time.Since(startWal)
 
+	b.servingSize = toSize
 	klog.Infof("buildMap: total=%s (wal=%s, vindex=%s)", durationTotal, durationWal, durationVIndex)
 	return nil
 }
 
-type writeAheadLog struct {
+// walWriter provides the methods needed by the processor of the Input Log when interacting
+// with the WAL. init provides the index that this processor should start from, and append
+// allows new mapped entries to be added to the WAL.
+type walWriter struct {
 	walPath string
 	f       *os.File
 }
@@ -321,7 +347,7 @@ type writeAheadLog struct {
 //
 // Note that it returns the next expected index to avoid awkwardness with the meaning of 0,
 // which could mean 0 was successfully read from a previous run, or that there was no log.
-func (l *writeAheadLog) init() (uint64, error) {
+func (l *walWriter) init() (uint64, error) {
 	ffs := os.O_WRONLY | os.O_APPEND
 
 	idx, err := l.validate()
@@ -342,14 +368,14 @@ func (l *writeAheadLog) init() (uint64, error) {
 	return idx, err
 }
 
-func (l *writeAheadLog) close() error {
+func (l *walWriter) close() error {
 	return l.f.Close()
 }
 
 // validate reads the file and determines what the last mapped log index was, and returns it.
 // The assumption is that all lines ending with a newline were written correctly.
 // If there are any errors in the file then this throws an error.
-func (l *writeAheadLog) validate() (uint64, error) {
+func (l *walWriter) validate() (uint64, error) {
 	f, err := os.Open(l.walPath)
 	if err != nil {
 		return 0, err
@@ -417,7 +443,7 @@ func (l *writeAheadLog) validate() (uint64, error) {
 	return idx, err
 }
 
-func (l *writeAheadLog) append(idx uint64, hashes [][32]byte) error {
+func (l *walWriter) append(idx uint64, hashes [][32]byte) error {
 	e, err := marshalWalEntry(idx, hashes)
 	if err != nil {
 		return fmt.Errorf("failed to marshal entry: %v", err)
@@ -426,18 +452,18 @@ func (l *writeAheadLog) append(idx uint64, hashes [][32]byte) error {
 	return err
 }
 
-func newLogReader(path string) (*logReader, error) {
+func newWalReader(path string) (*walReader, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	return &logReader{
+	return &walReader{
 		f: f,
 		r: bufio.NewReader(f),
 	}, nil
 }
 
-type logReader struct {
+type walReader struct {
 	f       *os.File
 	r       *bufio.Reader
 	partial string
@@ -447,7 +473,7 @@ type logReader struct {
 // TODO(mhutchinson): change this as it's inconvenient with EOF handling,
 // which should be common when reader hits the end of the file but more is
 // to be written.
-func (r *logReader) next() (uint64, [][32]byte, error) {
+func (r *walReader) next() (uint64, [][32]byte, error) {
 	line, err := r.r.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -462,7 +488,7 @@ func (r *logReader) next() (uint64, [][32]byte, error) {
 	return unmarshalWalEntry(line)
 }
 
-func (r *logReader) close() error {
+func (r *walReader) close() error {
 	return r.f.Close()
 }
 
