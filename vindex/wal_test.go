@@ -17,6 +17,7 @@
 package vindex
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"io"
@@ -57,7 +58,8 @@ func TestWriteAheadLog_init(t *testing.T) {
 		}, {
 			desc:         "trailing corruption",
 			fileContents: "1\n2 fdfxx",
-			wantErr:      true,
+			wantIdx:      2,
+			wantErr:      false,
 		}, {
 			desc:         "lots of newlines",
 			fileContents: "1\n2\n3\n\n",
@@ -65,7 +67,7 @@ func TestWriteAheadLog_init(t *testing.T) {
 		}, {
 			desc:         "no trailing newlines",
 			fileContents: "1\n2\n3",
-			wantErr:      true,
+			wantIdx:      3,
 		},
 	}
 	for _, tC := range testCases {
@@ -80,16 +82,13 @@ func TestWriteAheadLog_init(t *testing.T) {
 			if err := f.Close(); err != nil {
 				t.Fatal(err)
 			}
-			wal := &walWriter{
-				walPath: f.Name(),
-			}
-			idx, err := wal.init()
-			if gotErr := err != nil; gotErr != tC.wantErr {
-				t.Fatalf("wantErr != gotErr (%t != %t) %v", tC.wantErr, gotErr, err)
-			}
+			wal, idx, err := newWalWriter(f.Name())
 			defer func() {
 				_ = wal.close()
 			}()
+			if gotErr := err != nil; gotErr != tC.wantErr {
+				t.Fatalf("wantErr != gotErr (%t != %t) %v", tC.wantErr, gotErr, err)
+			}
 			if tC.wantErr {
 				return
 			}
@@ -97,6 +96,34 @@ func TestWriteAheadLog_init(t *testing.T) {
 				t.Errorf("want idx %v but got %v", tC.wantIdx, idx)
 			}
 		})
+	}
+}
+
+func TestWriteAheadLog_truncate(t *testing.T) {
+	f, err := os.CreateTemp("", "testWal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("0\n2\n5 xxabcdeadbeef"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	wal, idx, err := newWalWriter(f.Name())
+	defer func() {
+		_ = wal.close()
+	}()
+	if got, want := idx, uint64(3); got != want {
+		t.Errorf("expected next index %d, but got %d", want, got)
+	}
+
+	contents, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := contents, []byte("0\n2\n"); !bytes.Equal(got, want) {
+		t.Errorf("expected %v but got %v", want, got)
 	}
 }
 
@@ -112,10 +139,7 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wal := &walWriter{
-		walPath: f.Name(),
-	}
-	idx, err := wal.init()
+	wal, idx, err := newWalWriter(f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +158,7 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 		t.Error(err)
 	}
 
-	idx, err = wal.init()
+	wal, idx, err = newWalWriter(f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +183,7 @@ func TestWriteAndWriteLog(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wal := &walWriter{
-		walPath: f.Name(),
-	}
-	idx, err := wal.init()
+	wal, idx, err := newWalWriter(f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}

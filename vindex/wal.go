@@ -23,7 +23,17 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
+
+func newWalWriter(walPath string) (*walWriter, uint64, error) {
+	w := &walWriter{
+		walPath: walPath,
+	}
+	idx, err := w.init()
+	return w, idx, err
+}
 
 // walWriter provides the methods needed by the processor of the Input Log when interacting
 // with the WAL. init provides the index that this processor should start from, and append
@@ -41,7 +51,7 @@ type walWriter struct {
 func (l *walWriter) init() (uint64, error) {
 	ffs := os.O_WRONLY | os.O_APPEND
 
-	idx, err := l.validate()
+	idx, err := validate(l.walPath)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return idx, err
@@ -66,8 +76,8 @@ func (l *walWriter) close() error {
 // validate reads the file and determines what the last mapped log index was, and returns it.
 // The assumption is that all lines ending with a newline were written correctly.
 // If there are any errors in the file then this throws an error.
-func (l *walWriter) validate() (uint64, error) {
-	f, err := os.Open(l.walPath)
+func validate(walPath string) (uint64, error) {
+	f, err := os.OpenFile(walPath, os.O_RDWR, 0o644)
 	if err != nil {
 		return 0, err
 	}
@@ -82,56 +92,56 @@ func (l *walWriter) validate() (uint64, error) {
 	// Handle trivial case of empty file
 	size := fi.Size()
 	if size == 0 {
-		if err := os.Remove(l.walPath); err != nil {
+		if err := os.Remove(walPath); err != nil {
 			return 0, fmt.Errorf("failed to delete empty file: %s", err)
 		}
 		return 0, os.ErrNotExist
 	}
 
-	// Confirm last character is a newline
-	// TODO(mhutchinson): support ignoring incomplete lines
-	lastChar := make([]byte, 1)
-	if _, err := f.ReadAt(lastChar, size-1); err != nil {
-		return 0, err
-	}
-	if lastChar[0] != '\n' {
-		return 0, fmt.Errorf("expected final newline but got '%x'", lastChar[0])
-	}
-
 	// Read from the end of the file in stripes, terminating when we either:
 	// a) find another newline; or
 	// b) we have read from the beginning of the file
-	var lastLine string
+	var buffer string
 	const stripeSize = 1024
 	readStripe := make([]byte, stripeSize)
-	// Set it up so we read all but the last character (we know it's a newline)
-	currOffset := size - 1 - stripeSize
+	seekPos := size - stripeSize
+	droppedTail := false
 
 	for {
-		if currOffset < 0 {
+		if seekPos < 0 {
 			// If the stripe is bigger than the remaining file contents, adjust the offset
 			// and scale down what we'll read to avoid reading duplicates.
-			readStripe = readStripe[:stripeSize+currOffset]
-			currOffset = 0
+			readStripe = readStripe[:stripeSize+seekPos]
+			seekPos = 0
 		}
-		if _, err := f.ReadAt(readStripe, currOffset); err != nil {
+		if _, err := f.ReadAt(readStripe, seekPos); err != nil {
 			return 0, err
 		}
-		lastLine = string(readStripe) + lastLine
-		if idx := strings.LastIndexByte(lastLine, '\n'); idx > 0 {
-			lastLine = lastLine[idx+1:]
-			break
+		buffer = string(readStripe) + buffer
+
+		for i := strings.LastIndex(buffer, "\n"); i > 0; i = strings.LastIndex(buffer, "\n") {
+			p := buffer[i+1:]
+			buffer = buffer[:i]
+			if !droppedTail {
+				droppedTail = true
+				if len(p) > 0 {
+					truncPos := seekPos + int64(i) + 1
+					klog.Warningf("Dropping tail part from WAL: %q", p)
+					if err := f.Truncate(truncPos); err != nil {
+						return 0, fmt.Errorf("failed to truncate WAL: %v", err)
+					}
+				}
+				continue
+			}
+			idx, _, err := unmarshalWalEntry(p)
+			return idx, err
 		}
-		if currOffset == 0 {
-			// We read from the start of the file so lastLine is full
-			break
+		if seekPos == 0 {
+			idx, _, err := unmarshalWalEntry(buffer)
+			return idx, err
 		}
-		currOffset = currOffset - stripeSize
+		seekPos = seekPos - stripeSize
 	}
-
-	idx, _, err := unmarshalWalEntry(lastLine)
-
-	return idx, err
 }
 
 func (l *walWriter) append(idx uint64, hashes [][32]byte) error {

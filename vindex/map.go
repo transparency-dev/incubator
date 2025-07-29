@@ -66,10 +66,7 @@ type OpenCheckpointFn func(cpRaw []byte) (*log.Checkpoint, error)
 // Note that only one IndexBuilder should exist for any given walPath at any time. The behaviour is unspecified,
 // but likely broken, if multiple processes are writing to the same file at any given time.
 func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn OpenCheckpointFn, mapFn MapFn, walPath string) (*VerifiableIndex, error) {
-	wal := &walWriter{
-		walPath: walPath,
-	}
-	ws, err := wal.init()
+	wal, ws, err := newWalWriter(walPath)
 	if err != nil {
 		return nil, err
 	}
