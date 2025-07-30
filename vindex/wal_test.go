@@ -111,6 +111,9 @@ func TestWriteAheadLog_truncate(t *testing.T) {
 		t.Fatal(err)
 	}
 	wal, idx, err := newWalWriter(f.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		_ = wal.close()
 	}()
