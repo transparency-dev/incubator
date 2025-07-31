@@ -57,18 +57,24 @@ func TestVerifiableIndex(t *testing.T) {
 		cp, _, _, err := log.ParseCheckpoint(cpRaw, v.Name(), v)
 		return cp, err
 	}
-	mapFn := func(leaf []byte) [][32]byte {
+	mapFn := func(leaf []byte) [][sha256.Size]byte {
 		key, _, found := bytes.Cut(leaf, []byte(":"))
 		if !found {
 			panic("colon not found")
 		}
-		return [][32]byte{sha256.Sum256(key)}
+		return [][sha256.Size]byte{sha256.Sum256(key)}
 	}
-	f, err := os.CreateTemp("", "testWal")
+	f, err := os.CreateTemp("", "vindexTestDir")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(f.Name()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(f.Name(), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	vi, err := NewVerifiableIndex(ctx, inputLog, inputLogCpParseFn, mapFn, f.Name())
@@ -137,7 +143,7 @@ func (s *inMemoryTreeSource) Leaves(ctx context.Context, start, end uint64) iter
 func (s *inMemoryTreeSource) Append(leafStr string) {
 	leaf := []byte(leafStr)
 	s.leaves = append(s.leaves, leaf)
-	s.t.Append(leaf)
+	s.t.Append(rfc6962.DefaultHasher.HashLeaf(leaf))
 }
 
 func mustHashEncode(data string) string {

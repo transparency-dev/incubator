@@ -78,10 +78,13 @@ func run(ctx context.Context) error {
 		return errors.New("storage_dir must be set")
 	}
 	inputLogDir := path.Join(*storageDir, "inputlog")
-	walPath := path.Join(*storageDir, "index.wal")
+	mapRoot := path.Join(*storageDir, "vindex")
 
 	if err := os.MkdirAll(inputLogDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create input log directory: %v", err)
+	}
+	if err := os.MkdirAll(mapRoot, 0o755); err != nil {
+		return fmt.Errorf("failed to create vindex directory: %v", err)
 	}
 
 	// Gather the info needed for reading/writing checkpoints
@@ -95,7 +98,7 @@ func run(ctx context.Context) error {
 
 	inputAppender, inputShutdown, inputReader, err := tessera.NewAppender(ctx, ild, tessera.NewAppendOptions().
 		WithCheckpointSigner(ils).
-		WithCheckpointInterval(10*time.Second).
+		WithCheckpointInterval(5*time.Second).
 		WithBatching(256, time.Second))
 	if err != nil {
 		return fmt.Errorf("failed to get appender: %v", err)
@@ -113,7 +116,7 @@ func run(ctx context.Context) error {
 		cp, _, _, err := log.ParseCheckpoint(cpRaw, ilv.Name(), ilv)
 		return cp, err
 	}
-	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, inputLogCpParseFn, mapFnFromFlags(), walPath)
+	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, inputLogCpParseFn, mapFnFromFlags(), mapRoot)
 	if err != nil {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
@@ -140,7 +143,10 @@ func (s logReaderSource) Checkpoint(ctx context.Context) (checkpoint []byte, err
 }
 
 func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error] {
-	bi := client.EntryBundles(ctx, 2, s.r.IntegratedSize, s.r.ReadEntryBundle, start, end-start)
+	tsf := func(ctx context.Context) (uint64, error) {
+		return end, nil
+	}
+	bi := client.EntryBundles(ctx, 2, tsf, s.r.ReadEntryBundle, start, end-start)
 	unbundleFn := func(bundle []byte) ([][]byte, error) {
 		eb := &api.EntryBundle{}
 		if err := eb.UnmarshalText(bundle); err != nil {
@@ -275,7 +281,7 @@ func getKeyFile(path string) (string, error) {
 }
 
 func mapFnFromFlags() vindex.MapFn {
-	mapFn := func(data []byte) [][32]byte {
+	mapFn := func(data []byte) [][sha256.Size]byte {
 		var entry LogEntry
 		if err := json.Unmarshal(data, &entry); err != nil {
 			panic(fmt.Errorf("failed to unmarshal entry: %v", err))
@@ -285,7 +291,7 @@ func mapFnFromFlags() vindex.MapFn {
 		// This could be changed to return something more complex, e.g. include
 		// a static prefix of "module=", which would allow the same map to host
 		// multiple queries in parallel.
-		return [][32]byte{sha256.Sum256([]byte(entry.Module))}
+		return [][sha256.Size]byte{sha256.Sum256([]byte(entry.Module))}
 	}
 	return mapFn
 }
