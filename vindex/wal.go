@@ -16,6 +16,7 @@ package vindex
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -162,7 +163,7 @@ func (l *walWriter) flush() error {
 	return l.f.Sync()
 }
 
-func (l *walWriter) append(idx uint64, hashes [][32]byte) error {
+func (l *walWriter) append(idx uint64, hashes [][sha256.Size]byte) error {
 	e, err := marshalWalEntry(idx, hashes)
 	if err != nil {
 		return fmt.Errorf("failed to marshal entry: %v", err)
@@ -192,7 +193,7 @@ type walReader struct {
 // TODO(mhutchinson): change this as it's inconvenient with EOF handling,
 // which should be common when reader hits the end of the file but more is
 // to be written.
-func (r *walReader) next() (uint64, [][32]byte, error) {
+func (r *walReader) next() (uint64, [][sha256.Size]byte, error) {
 	line, err := r.r.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -213,23 +214,23 @@ func (r *walReader) close() error {
 
 // unmarshalWalEntry parses a line from the WAL.
 // This is the reverse of marshalWalEntry.
-func unmarshalWalEntry(e string) (uint64, [][32]byte, error) {
+func unmarshalWalEntry(e string) (uint64, [][sha256.Size]byte, error) {
 	tokens := strings.Split(e, " ")
 	idx, err := strconv.ParseUint(tokens[0], 10, 64)
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to parse idx from %q", e)
 	}
 
-	hashes := make([][32]byte, 0, len(tokens)-1)
+	hashes := make([][sha256.Size]byte, 0, len(tokens)-1)
 	for i, h := range tokens[1:] {
 		parsed, err := hex.DecodeString(h)
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to parse hex token %d from %q", i, e)
 		}
-		if got, want := len(parsed), 32; got != want {
-			return 0, nil, fmt.Errorf("expected 32 byte hash but got %d bytes at idx %d", got, i)
+		if got, want := len(parsed), sha256.Size; got != want {
+			return 0, nil, fmt.Errorf("expected %d byte hash but got %d bytes at idx %d", want, got, i)
 		}
-		hashes = append(hashes, [32]byte(parsed))
+		hashes = append(hashes, [sha256.Size]byte(parsed))
 	}
 
 	return idx, hashes, nil
@@ -237,7 +238,7 @@ func unmarshalWalEntry(e string) (uint64, [][32]byte, error) {
 
 // unmarshalWalEntry converts an index and the hashes it affects into a line for the WAL.
 // This is the reverse of unmarshalWalEntry.
-func marshalWalEntry(idx uint64, hashes [][32]byte) (string, error) {
+func marshalWalEntry(idx uint64, hashes [][sha256.Size]byte) (string, error) {
 	sb := strings.Builder{}
 	if _, err := sb.WriteString(strconv.FormatUint(idx, 10)); err != nil {
 		return "", err

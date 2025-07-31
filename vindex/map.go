@@ -42,9 +42,9 @@ import (
 )
 
 const (
-	db_latestCheckpointKey = "latestCheckpoint"
-	db_compactRangeKey     = "compactRange"
-	db_compactRangeSizeKey = "compactRangeSize"
+	dbLatestCheckpointKey = "latestCheckpoint"
+	dbCompactRangeKey     = "compactRange"
+	dbCompactRangeSizeKey = "compactRangeSize"
 )
 
 // MapFn takes the raw leaf data from a log entry and outputs the SHA256 hashes
@@ -55,7 +55,7 @@ const (
 // makes sense to the particular ecosystem. This might mean outputting any invalid leaves
 // at a known locations (e.g. all 0s), or not outputting any entry. Any panics will cause
 // the mapping process to terminate.
-type MapFn func([]byte) [][32]byte
+type MapFn func([]byte) [][sha256.Size]byte
 
 // InputLog represents a connection to the input log from which map data will be built.
 // This can be a local or remote data source.
@@ -103,14 +103,14 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn 
 	snap := db.NewSnapshot()
 	defer logClose(snap)
 
-	if sizeBs, sizeCloser, err := snap.Get([]byte(db_compactRangeSizeKey)); err != nil {
+	if sizeBs, sizeCloser, err := snap.Get([]byte(dbCompactRangeSizeKey)); err != nil {
 		if err != pebble.ErrNotFound {
 			return nil, fmt.Errorf("pebble.Get(): %v", err)
 		}
 		size = 0
 		cr = crf.NewEmptyRange(0)
 	} else {
-		crBs, crCloser, err := snap.Get([]byte(db_compactRangeKey))
+		crBs, crCloser, err := snap.Get([]byte(dbCompactRangeKey))
 		if err != nil {
 			return nil, fmt.Errorf("pebble.Get(): %v", err)
 		}
@@ -155,7 +155,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn 
 		walReader: reader,
 		db:        db,
 		vindex:    *mpt.NewTree(sha256.Sum256, vtreeStorage),
-		data:      map[[32]byte][]uint64{},
+		data:      map[[sha256.Size]byte][]uint64{},
 	}
 	if err := b.buildMap(ctx); err != nil {
 		return nil, fmt.Errorf("failed to build map: %v", err)
@@ -214,7 +214,7 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 
 			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
 			// and failing gracefully.
-			var hashes [][32]byte
+			var hashes [][sha256.Size]byte
 			var mapErr error
 			func() {
 				defer func() {
@@ -264,7 +264,7 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 	if !bytes.Equal(hash, cp.Hash) {
 		return fmt.Errorf("calculated hash for tree size %d is %x, but checkpoint commits to %x", cp.Size, hash, cp.Hash)
 	}
-	if err := m.db.Set([]byte(db_latestCheckpointKey), rawCp, pebble.Sync); err != nil {
+	if err := m.db.Set([]byte(dbLatestCheckpointKey), rawCp, pebble.Sync); err != nil {
 		return fmt.Errorf("failed to update state: %v", err)
 	}
 
@@ -273,15 +273,15 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 }
 
 func (m *inputLogMapper) storeState() error {
-	flatSlice := make([]byte, len(m.r.Hashes())*32)
+	flatSlice := make([]byte, len(m.r.Hashes())*sha256.Size)
 	for i, arr := range m.r.Hashes() {
-		copy(flatSlice[i*32:], arr[:])
+		copy(flatSlice[i*sha256.Size:], arr[:])
 	}
 	b := m.db.NewBatch()
-	if err := b.Set([]byte(db_compactRangeKey), flatSlice, pebble.Sync); err != nil {
+	if err := b.Set([]byte(dbCompactRangeKey), flatSlice, pebble.Sync); err != nil {
 		return fmt.Errorf("failed to update state: %v", err)
 	}
-	if err := b.Set([]byte(db_compactRangeSizeKey), binary.BigEndian.AppendUint64(nil, m.r.End()), pebble.Sync); err != nil {
+	if err := b.Set([]byte(dbCompactRangeSizeKey), binary.BigEndian.AppendUint64(nil, m.r.End()), pebble.Sync); err != nil {
 		return fmt.Errorf("failed to update state: %v", err)
 	}
 	if err := m.db.Apply(b, pebble.Sync); err != nil {
@@ -299,7 +299,7 @@ type VerifiableIndex struct {
 
 	indexMu sync.RWMutex // covers vindex and data
 	vindex  mpt.Tree
-	data    map[[32]byte][]uint64
+	data    map[[sha256.Size]byte][]uint64
 
 	// servingSize is the size of the input log we are serving for.
 	// This a temporary workaround not having an output log, which we will eventually read to get
@@ -351,9 +351,9 @@ func (b *VerifiableIndex) Update(ctx context.Context) error {
 // built up the provided size.
 func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	startWal := time.Now()
-	updatedKeys := make(map[[32]byte]bool) // Allows us to efficiently update vindex after first init
+	updatedKeys := make(map[[sha256.Size]byte]bool) // Allows us to efficiently update vindex after first init
 
-	cpRaw, closer, err := b.db.Get([]byte(db_latestCheckpointKey))
+	cpRaw, closer, err := b.db.Get([]byte(dbLatestCheckpointKey))
 	if err != nil {
 		if err == pebble.ErrNotFound {
 			// If the key isn't there then nothing to do.
@@ -431,7 +431,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 		}
 
 		// Finally, we update the vindex
-		if err := b.vindex.Insert(h, [32]byte(sum.Sum(nil))); err != nil {
+		if err := b.vindex.Insert(h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
 			return fmt.Errorf("Insert(): %s", err)
 		}
 	}

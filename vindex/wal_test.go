@@ -168,7 +168,7 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 
 			for i := range tC.entriesToWrite {
 				hash := sha256.Sum256([]byte{byte(i)})
-				if err := wal.append(uint64(i), [][32]byte{hash}); err != nil {
+				if err := wal.append(uint64(i), [][sha256.Size]byte{hash}); err != nil {
 					t.Error(err)
 				}
 			}
@@ -233,7 +233,7 @@ func TestWriteAndWriteLog(t *testing.T) {
 	eg.Go(func() error {
 		for i := range count {
 			hash := sha256.Sum256([]byte{byte(i)})
-			if err := wal.append(uint64(i), [][32]byte{hash}); err != nil {
+			if err := wal.append(uint64(i), [][sha256.Size]byte{hash}); err != nil {
 				return err
 			}
 		}

@@ -57,12 +57,12 @@ func TestVerifiableIndex(t *testing.T) {
 		cp, _, _, err := log.ParseCheckpoint(cpRaw, v.Name(), v)
 		return cp, err
 	}
-	mapFn := func(leaf []byte) [][32]byte {
+	mapFn := func(leaf []byte) [][sha256.Size]byte {
 		key, _, found := bytes.Cut(leaf, []byte(":"))
 		if !found {
 			panic("colon not found")
 		}
-		return [][32]byte{sha256.Sum256(key)}
+		return [][sha256.Size]byte{sha256.Sum256(key)}
 	}
 	f, err := os.CreateTemp("", "vindexTestDir")
 	if err != nil {

@@ -281,7 +281,7 @@ func getKeyFile(path string) (string, error) {
 }
 
 func mapFnFromFlags() vindex.MapFn {
-	mapFn := func(data []byte) [][32]byte {
+	mapFn := func(data []byte) [][sha256.Size]byte {
 		var entry LogEntry
 		if err := json.Unmarshal(data, &entry); err != nil {
 			panic(fmt.Errorf("failed to unmarshal entry: %v", err))
@@ -291,7 +291,7 @@ func mapFnFromFlags() vindex.MapFn {
 		// This could be changed to return something more complex, e.g. include
 		// a static prefix of "module=", which would allow the same map to host
 		// multiple queries in parallel.
-		return [][32]byte{sha256.Sum256([]byte(entry.Module))}
+		return [][sha256.Size]byte{sha256.Sum256([]byte(entry.Module))}
 	}
 	return mapFn
 }
