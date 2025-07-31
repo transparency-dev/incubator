@@ -221,14 +221,16 @@ go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --lookup=foo
 |  1  | Public code base and documentation for prototype          |   ✅   |
 |  2  | Implementation of in-memory Merkle Radix Tree             |   ✅   |
 |  3  | Incremental update                                        |   ✅   |
-|  4  | Example written for mapping SumDB                         |   ✅   |
-|  5  | Proofs served on Lookup                                   |   ❌   |
-|  6  | Output log                                                |   ❌   |
+|  4  | Verify that mapped data matches Input Log Checkpoint      |   ✅   |
+|  5  | Output log                                                |   ❌   |
+|  6  | Proofs served on Lookup                                   |   ❌   |
 |  7  | Storage backed verifiable-map                             |   ❌   |
-|  8  | Example written for mapping CT                            |   ⚠️   |
-|  9  | MapFn defined in WASM                                     |   ❌   |
-|  10 | Proper repository for this code to live long-term         |   ❌   |
-|  11 | Support reading directly from Input Log instead of Clone  |   ❌   |
+|  8  | MapFn defined in WASM                                     |   ❌   |
+|  9  | Proper repository for this code to live long-term         |   ❌   |
+|  10 | Support reading directly from Input Log instead of Clone  |   ✅   |
+|  11 | Example written for mapping SumDB                         |   ✅   |
+|  12 | Example written for hosting a log and VIndex together     |   ✅   |
+|  13 | Example written for mapping CT                            |   ⚠️   |
 |  N  | Production ready                                          |   ❌   |
 
 
