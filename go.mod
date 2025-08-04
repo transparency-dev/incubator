@@ -4,11 +4,12 @@ go 1.24.1
 
 require (
 	filippo.io/torchwood v0.5.1-0.20250605130057-fa65d721a6ce
+	github.com/cockroachdb/pebble v1.1.5
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
 	github.com/transparency-dev/formats v0.0.0-20250723101439-be3b1008ec3a
 	github.com/transparency-dev/merkle v0.0.2
-	github.com/transparency-dev/tessera v0.2.1-0.20250722085756-7303218c6614
+	github.com/transparency-dev/tessera v1.0.0-rc1
 	golang.org/x/mod v0.26.0
 	golang.org/x/sync v0.16.0
 	k8s.io/klog/v2 v2.130.1
@@ -22,7 +23,6 @@ require (
 	github.com/cockroachdb/errors v1.11.3 // indirect
 	github.com/cockroachdb/fifo v0.0.0-20240606204812-0bbfbd93a7ce // indirect
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
-	github.com/cockroachdb/pebble v1.1.5 // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
 	github.com/getsentry/sentry-go v0.27.0 // indirect
