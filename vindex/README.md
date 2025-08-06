@@ -191,7 +191,7 @@ In this repository, there is a demo of running a [tlog-tiles][] log using [Tesse
 Below are instructions for running this demo with sample key material:
 
 ```shell
-LOG_PRIVATE_KEY=PRIVATE+KEY+logandmap+38581672+AXJ0FKWOcO2ch6WC8kP705Ed3Gxu7pVtZLhfHAQwp+FE; go run ./vindex/cmd/logandmap --input_log_dir ~/logandmap/inputlog/ --walPath ~/logandmap/map.wal
+INPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+example.com/inputlog+bd6268fb+ATPZW5UsUYHJo24lwgK1ykm9VafhyUtUxX5evV4ZIokY OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+example.com/outputlog+07392c46+ATPJ4crkyUbPeaRffN/4NUof3KV0pQznVIPGOQm3SDEJ go run ./vindex/cmd/logandmap --storage_dir ~/logandmap/
 ```
 
 Running the above will run a web server hosting the following URLs:
@@ -203,7 +203,11 @@ The input log has entries for packages in the set {`foo`, `bar`, `baz`, `splat`}
 To inspect the log, you can use the woodpecker tool (using the corresponding public key to the private key used above):
 
 ```shell
-go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/inputlog --custom_log_vkey=logandmap+38581672+Ab/PCr1eCclRPRMBqw/r5An1xO71MCnImLiospEq6b4l
+# To inspect the Input Log
+go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/inputlog/ --custom_log_vkey=example.com/inputlog+bd6268fb+AWdGkrHKBm+pOubTrcBTV8JMDLFlF1Y8WUH1nrtLNXDr
+
+# To inspect the Output Log
+go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/outputlog/ --custom_log_vkey=example.com/outputlog+07392c46+AWyS8y8ZsRmQnTr6Fr2knaa8+t6CPYFh5Ho3wJEr14B8
 ```
 
 Use left/right cursor to browse, and `q` to quit.
@@ -222,7 +226,7 @@ go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --lookup=foo
 |  2  | Implementation of in-memory Merkle Radix Tree             |   ✅   |
 |  3  | Incremental update                                        |   ✅   |
 |  4  | Verify that mapped data matches Input Log Checkpoint      |   ✅   |
-|  5  | Output log                                                |   ❌   |
+|  5  | Output log                                                |   ✅   |
 |  6  | Proofs served on Lookup                                   |   ❌   |
 |  7  | Storage backed verifiable-map                             |   ❌   |
 |  8  | MapFn defined in WASM                                     |   ❌   |

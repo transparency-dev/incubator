@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"iter"
 	"os"
+	"path"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -48,15 +49,12 @@ func TestVerifiableIndex(t *testing.T) {
 		t:      testonly.New(rfc6962.DefaultHasher),
 		leaves: make([][]byte, 0),
 		s:      s,
+		v:      v,
 	}
 	for _, str := range []string{"foo: 2", "bar: 5", "bar: 10", "foo: 8"} {
 		inputLog.Append(str)
 	}
 
-	inputLogCpParseFn := func(cpRaw []byte) (*log.Checkpoint, error) {
-		cp, _, _, err := log.ParseCheckpoint(cpRaw, v.Name(), v)
-		return cp, err
-	}
 	mapFn := func(leaf []byte) [][sha256.Size]byte {
 		key, _, found := bytes.Cut(leaf, []byte(":"))
 		if !found {
@@ -77,7 +75,14 @@ func TestVerifiableIndex(t *testing.T) {
 	if err := os.MkdirAll(f.Name(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	vi, err := NewVerifiableIndex(ctx, inputLog, inputLogCpParseFn, mapFn, f.Name())
+
+	old := path.Join(f.Name(), "outputlog")
+	outputLog, closer, err := NewOutputLog(ctx, old, s, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closer()
+	vi, err := NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,6 +120,7 @@ type inMemoryTreeSource struct {
 	t      *testonly.Tree
 	leaves [][]byte
 	s      note.Signer
+	v      note.Verifier
 }
 
 func (s *inMemoryTreeSource) Checkpoint(ctx context.Context) (checkpoint []byte, err error) {
@@ -128,6 +134,11 @@ func (s *inMemoryTreeSource) Checkpoint(ctx context.Context) (checkpoint []byte,
 	}
 	n := &note.Note{Text: string(cp.Marshal())}
 	return note.Sign(n, s.s)
+}
+
+func (s *inMemoryTreeSource) Parse(cpRaw []byte) (*log.Checkpoint, error) {
+	cp, _, _, err := log.ParseCheckpoint(cpRaw, s.v.Name(), s.v)
+	return cp, err
 }
 
 func (s *inMemoryTreeSource) Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error] {
