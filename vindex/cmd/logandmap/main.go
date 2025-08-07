@@ -50,9 +50,10 @@ import (
 )
 
 var (
-	inputLogPrivKeyFile = flag.String("input_log_private_key", "", "Location of private key file. If unset, uses the contents of the INPUT_LOG_PRIVATE_KEY environment variable.")
-	storageDir          = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Input Log, Output Log, and allocate space to store the verifiable map persistence.")
-	listen              = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
+	inputLogPrivKeyFile  = flag.String("input_log_private_key", "", "Location of private key file. If unset, uses the contents of the INPUT_LOG_PRIVATE_KEY environment variable.")
+	outputLogPrivKeyFile = flag.String("output_log_private_key", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
+	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Input Log, Output Log, and allocate space to store the verifiable map persistence.")
+	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
 func main() {
@@ -78,22 +79,48 @@ func run(ctx context.Context) error {
 		return errors.New("storage_dir must be set")
 	}
 	inputLogDir := path.Join(*storageDir, "inputlog")
+	outputLogDir := path.Join(*storageDir, "outputlog")
 	mapRoot := path.Join(*storageDir, "vindex")
 
 	if err := os.MkdirAll(inputLogDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create input log directory: %v", err)
 	}
+	if err := os.MkdirAll(outputLogDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create output log directory: %v", err)
+	}
 	if err := os.MkdirAll(mapRoot, 0o755); err != nil {
 		return fmt.Errorf("failed to create vindex directory: %v", err)
 	}
 
+	inputLog, inputCloser := inputLogOrDie(ctx, inputLogDir)
+	defer inputCloser()
+
+	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
+	defer outputCloser()
+
+	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFnFromFlags(), outputLog, mapRoot)
+	if err != nil {
+		return fmt.Errorf("failed to create vindex: %v", err)
+	}
+
+	// Keeps the map synced with the latest published log state.
+	go maintainMap(ctx, vi)
+
+	// Run a web server to handle queries over the verifiable index.
+	go runWebServer(vi, inputLogDir, outputLogDir)
+	<-ctx.Done()
+	return nil
+}
+
+// inputLogOrDie returns an input log that is being updated periodically.
+func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource, closer func()) {
 	// Gather the info needed for reading/writing checkpoints
 	ils, ilv := getInputLogSignerVerifierOrDie()
 
 	// Set up a Tessera POSIX log
 	ild, err := posix.New(ctx, posix.Config{Path: inputLogDir})
 	if err != nil {
-		return fmt.Errorf("failed to create new log: %v", err)
+		klog.Exit(fmt.Errorf("failed to create input log: %v", err))
 	}
 
 	inputAppender, inputShutdown, inputReader, err := tessera.NewAppender(ctx, ild, tessera.NewAppendOptions().
@@ -101,45 +128,35 @@ func run(ctx context.Context) error {
 		WithCheckpointInterval(5*time.Second).
 		WithBatching(256, time.Second))
 	if err != nil {
-		return fmt.Errorf("failed to get appender: %v", err)
+		klog.Exit(fmt.Errorf("failed to get appender: %v", err))
 	}
-	defer func() {
-		_ = inputShutdown(ctx)
-	}()
 
-	// Create the verifiable index connected to the LogReader.
 	inputLog := logReaderSource{
 		r: inputReader,
-	}
-	inputLogCpParseFn := func(cpRaw []byte) (*log.Checkpoint, error) {
-		// No witnesses required yet
-		cp, _, _, err := log.ParseCheckpoint(cpRaw, ilv.Name(), ilv)
-		return cp, err
-	}
-	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, inputLogCpParseFn, mapFnFromFlags(), mapRoot)
-	if err != nil {
-		return fmt.Errorf("failed to create vindex: %v", err)
+		v: ilv,
 	}
 
 	// Submits new entries to the log in the background.
 	go submitEntries(ctx, inputAppender)
 
-	// Keeps the map synced with the latest published log state.
-	go maintainMap(ctx, vi)
-
-	// Run a web server to handle queries over the verifiable index.
-	go runWebServer(vi, inputLogDir)
-	<-ctx.Done()
-	return nil
+	return inputLog, func() {
+		_ = inputShutdown(ctx)
+	}
 }
 
 // logReaderSource adapts a tessera.LogReader to a vindex.InputLog.
 type logReaderSource struct {
 	r tessera.LogReader
+	v note.Verifier
 }
 
 func (s logReaderSource) Checkpoint(ctx context.Context) (checkpoint []byte, err error) {
 	return s.r.ReadCheckpoint(ctx)
+}
+
+func (s logReaderSource) Parse(cpRaw []byte) (*log.Checkpoint, error) {
+	cp, _, _, err := log.ParseCheckpoint(cpRaw, s.v.Name(), s.v)
+	return cp, err
 }
 
 func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error] {
@@ -169,6 +186,17 @@ func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq
 			}
 		}
 	}
+}
+
+// outputLogOrDie returns an output log using a POSIX log in the given directory.
+func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func()) {
+	s, v := getOutputLogSignerVerifierOrDie()
+
+	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v)
+	if err != nil {
+		klog.Exit(err)
+	}
+	return l, c
 }
 
 // maintainMap reads entries from the log and sync them to the vindex.
@@ -226,7 +254,7 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 	}
 }
 
-func runWebServer(vi *vindex.VerifiableIndex, ild string) {
+func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) {
 	web := NewServer(func(h [sha256.Size]byte) ([]uint64, error) {
 		idxes, size := vi.Lookup(h)
 		if size == 0 {
@@ -235,9 +263,11 @@ func runWebServer(vi *vindex.VerifiableIndex, ild string) {
 		return idxes, nil
 	})
 
-	ilfs := http.FileServer(http.Dir(ild))
+	ilfs := http.FileServer(http.Dir(inLogDir))
+	olfs := http.FileServer(http.Dir(outLogDir))
 	r := mux.NewRouter()
 	r.PathPrefix("/inputlog/").Handler(http.StripPrefix("/inputlog/", ilfs))
+	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
 	web.registerHandlers(r)
 	hServer := &http.Server{
 		Addr:    *listen,
@@ -263,6 +293,29 @@ func getInputLogSignerVerifierOrDie() (note.Signer, note.Verifier) {
 		privKey = os.Getenv("INPUT_LOG_PRIVATE_KEY")
 		if len(privKey) == 0 {
 			klog.Exit("Supply private key file path using --input_log_private_key or set INPUT_LOG_PRIVATE_KEY environment variable")
+		}
+	}
+	s, v, err := fnote.NewEd25519SignerVerifier(privKey)
+	if err != nil {
+		klog.Exitf("Failed to get signer/verifier: %v", err)
+	}
+	return s, v
+}
+
+// Read output log private key from file or environment variable and generate the
+// note Signer and Verifier pair for it.
+func getOutputLogSignerVerifierOrDie() (note.Signer, note.Verifier) {
+	var privKey string
+	var err error
+	if len(*outputLogPrivKeyFile) > 0 {
+		privKey, err = getKeyFile(*outputLogPrivKeyFile)
+		if err != nil {
+			klog.Exitf("Unable to get private key: %v", err)
+		}
+	} else {
+		privKey = os.Getenv("OUTPUT_LOG_PRIVATE_KEY")
+		if len(privKey) == 0 {
+			klog.Exit("Supply private key file path using --output_log_private_key or set OUTPUT_LOG_PRIVATE_KEY environment variable")
 		}
 	}
 	s, v, err := fnote.NewEd25519SignerVerifier(privKey)
