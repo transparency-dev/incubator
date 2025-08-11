@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"iter"
@@ -62,9 +63,21 @@ type MapFn func([]byte) [][sha256.Size]byte
 type InputLog interface {
 	// Checkpoint returns the latest checkpoint committing to the input log state.
 	Checkpoint(ctx context.Context) (checkpoint []byte, err error)
+	// Parse unmarshals and verifies a checkpoint obtained from GetCheckpoint.
+	Parse(checkpoint []byte) (*log.Checkpoint, error)
 	// Leaves returns all the leaves in the range [start, end), outputting them via
 	// the returned iterator.
 	Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error]
+}
+
+// OutputLog is where map roots are written as leaves.
+type OutputLog interface {
+	// GetCheckpoint returns the latest checkpoint committing to the output log state.
+	Checkpoint(ctx context.Context) (checkpoint []byte, err error)
+	// Parse unmarshals and verifies a checkpoint obtained from GetCheckpoint.
+	Parse(checkpoint []byte) (*log.Checkpoint, error)
+	// Append adds a new leaf and returns the checkpoint that commits to it.
+	Append(ctx context.Context, data []byte) (idx uint64, checkpoint []byte, err error)
 }
 
 // OpenCheckpointFn is a function that parses a checkpoint, validating it, and returns a parsed
@@ -78,7 +91,7 @@ type OpenCheckpointFn func(cpRaw []byte) (*log.Checkpoint, error)
 // path.
 // Note that only one IndexBuilder should exist for any given walPath at any time. The behaviour is unspecified,
 // but likely broken, if multiple processes are writing to the same file at any given time.
-func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn OpenCheckpointFn, mapFn MapFn, rootDir string) (*VerifiableIndex, error) {
+func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, outputLog OutputLog, rootDir string) (*VerifiableIndex, error) {
 	stateDir := path.Join(rootDir, "state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, err
@@ -143,18 +156,19 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn 
 		return nil, fmt.Errorf("InitStorage: %s", err)
 	}
 	mapper := &inputLogMapper{
-		inputLog:        inputLog,
-		inputLogParseFn: inputLogParseFn,
-		mapFn:           mapFn,
-		walWriter:       wal,
-		db:              db,
-		r:               cr,
+		inputLog:  inputLog,
+		mapFn:     mapFn,
+		walWriter: wal,
+		db:        db,
+		r:         cr,
 	}
 	b := &VerifiableIndex{
 		mapper:    mapper,
 		walReader: reader,
 		db:        db,
+		outputLog: outputLog,
 		vindex:    *mpt.NewTree(sha256.Sum256, vtreeStorage),
+		vstore:    vtreeStorage,
 		data:      map[[sha256.Size]byte][]uint64{},
 	}
 	if err := b.buildMap(ctx); err != nil {
@@ -166,11 +180,10 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, inputLogParseFn 
 // inputLogMapper reads the Input Log, checking that the data matches the commitments,
 // and updates the WAL and DB with the resulting information.
 type inputLogMapper struct {
-	inputLog        InputLog
-	inputLogParseFn OpenCheckpointFn
-	mapFn           MapFn
-	walWriter       *walWriter
-	db              *pebble.DB
+	inputLog  InputLog
+	mapFn     MapFn
+	walWriter *walWriter
+	db        *pebble.DB
 
 	r *compact.Range
 }
@@ -191,9 +204,13 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get latest checkpoint from DB: %s", err)
 	}
-	cp, err := m.inputLogParseFn(rawCp)
+	cp, err := m.inputLog.Parse(rawCp)
 	if err != nil {
 		return fmt.Errorf("failed to parse checkpoint: %s", err)
+	}
+
+	if cp.Size == 0 {
+		return nil
 	}
 
 	if m.r.End() < cp.Size {
@@ -296,9 +313,11 @@ type VerifiableIndex struct {
 	mapper    *inputLogMapper
 	walReader *walReader
 	db        *pebble.DB
+	outputLog OutputLog
 
 	indexMu sync.RWMutex // covers vindex and data
 	vindex  mpt.Tree
+	vstore  mpt.Storage
 	data    map[[sha256.Size]byte][]uint64
 
 	// servingSize is the size of the input log we are serving for.
@@ -344,7 +363,54 @@ func (b *VerifiableIndex) Update(ctx context.Context) error {
 	if err := b.mapper.syncFromInputLog(ctx); err != nil {
 		return err
 	}
-	return b.buildMap(ctx)
+	if err := b.buildMap(ctx); err != nil {
+		return err
+	}
+	return b.publish(ctx)
+}
+
+func (b *VerifiableIndex) publish(ctx context.Context) error {
+	// Get the latest input log checkpoint the map was built from.
+	// TODO(mhutchinson): Possibly just pass this in?
+	inCp, inCloser, err := b.db.Get([]byte(dbLatestCheckpointKey))
+	if err != nil {
+		if err == pebble.ErrNotFound {
+			// If the key isn't there then nothing to do.
+			return nil
+		}
+		return fmt.Errorf("failed to read latest checkpoint: %v", err)
+	}
+	if err := inCloser.Close(); err != nil {
+		return fmt.Errorf("failed to close: %v", err)
+	}
+
+	// Construct the leaf for the output log
+	rootNode, err := b.vstore.Load(mpt.RootLabel)
+	if err != nil {
+		return fmt.Errorf("failed to load vindex root: %v", err)
+	}
+	leaf := append(hex.AppendEncode(nil, rootNode.Hash[:]), '\n', '\n')
+	leaf = append(leaf, inCp...)
+
+	outIdx, rawCp, err := b.outputLog.Append(ctx, leaf)
+	if err != nil {
+		return fmt.Errorf("failed to append to output log: %v", err)
+	}
+	if klog.V(1).Enabled() {
+		_, inSize, _, err := checkpointUnsafe(inCp)
+		if err != nil {
+			klog.Error(err)
+			return nil
+		}
+		_, outSize, _, err := checkpointUnsafe(rawCp)
+		if err != nil {
+			klog.Error(err)
+			return nil
+		}
+		klog.V(1).Infof("Published checkpoint for input log size %d into output log at index %d, and got checkpoint for output log size %d", inSize, outIdx, outSize)
+	}
+
+	return nil
 }
 
 // buildMap reads from the WAL until the file has been consumed and the map has been
