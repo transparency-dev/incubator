@@ -1,10 +1,9 @@
 ## Verifiable Index
 
-Status: Experimental.
+Status: Experimental. Goal is to have MVP by 2025Q3. See [Milestones](#milestones) for detailed feature progress.
 
 This idea has been distilled from years of experiments with maps, and a pressing need to have an efficient and verifiable way for an end-user to find _their_ data in logs without needing to download the whole log.
 
-This experiment should be considered a 20% project for the time being and isn't on the near-term official roadmap for transparency.dev.
 Discussions are welcome, please join us on [Transparency-Dev Slack](https://transparency.dev/slack/).
 
 [tlog-tiles]: https://c2sp.org/tlog-tiles
@@ -230,11 +229,11 @@ go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --lookup=foo
 |  6  | Proofs served on Lookup                                   |   ❌   |
 |  7  | Storage backed verifiable-map                             |   ❌   |
 |  8  | MapFn defined in WASM                                     |   ❌   |
-|  9  | Proper repository for this code to live long-term         |   ❌   |
-|  10 | Support reading directly from Input Log instead of Clone  |   ✅   |
-|  11 | Example written for mapping SumDB                         |   ✅   |
-|  12 | Example written for hosting a log and VIndex together     |   ✅   |
-|  13 | Example written for mapping CT                            |   ⚠️   |
+|  9  | Support reading directly from Input Log instead of Clone  |   ✅   |
+|  10 | Example written for mapping SumDB                         |   ✅   |
+|  11 | Example written for hosting a log and VIndex together     |   ✅   |
+|  12 | Example written for mapping CT                            |   ⚠️   |
+|  13 | Promote this from the `incubator` repo                    |   ❌   |
 |  N  | Production ready                                          |   ❌   |
 
 
