@@ -184,38 +184,9 @@ Values are an ordered list of indices.
 
 ## Status
 
-There is a basic end-to-end application written that supports SumDB in [trillian-examples](https://github.com/google/trillian-examples/tree/master/experimental/vindex/cmd).
-
-In this repository, there is a demo of running a [tlog-tiles][] log using [Tessera][], and keeping the contents of that log synced to a map.
-Below are instructions for running this demo with sample key material:
-
-```shell
-INPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+example.com/inputlog+bd6268fb+ATPZW5UsUYHJo24lwgK1ykm9VafhyUtUxX5evV4ZIokY OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+example.com/outputlog+07392c46+ATPJ4crkyUbPeaRffN/4NUof3KV0pQznVIPGOQm3SDEJ go run ./vindex/cmd/logandmap --storage_dir ~/logandmap/
-```
-
-Running the above will run a web server hosting the following URLs:
- - `/inputlog/` - the [tlog-tiles][] base URL for the input log
- - `/vindex/lookup` - the provisional [vindex lookup API](./api/api.go)
- - `/outputlog/` - TODO(mhutchinson): this is where the output log will be hosted
-
-The input log has entries for packages in the set {`foo`, `bar`, `baz`, `splat`}.
-To inspect the log, you can use the woodpecker tool (using the corresponding public key to the private key used above):
-
-```shell
-# To inspect the Input Log
-go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/inputlog/ --custom_log_vkey=example.com/inputlog+bd6268fb+AWdGkrHKBm+pOubTrcBTV8JMDLFlF1Y8WUH1nrtLNXDr
-
-# To inspect the Output Log
-go run github.com/mhutchinson/woodpecker@main --custom_log_type=tiles --custom_log_url=http://localhost:8088/outputlog/ --custom_log_vkey=example.com/outputlog+07392c46+AWyS8y8ZsRmQnTr6Fr2knaa8+t6CPYFh5Ho3wJEr14B8
-```
-
-Use left/right cursor to browse, and `q` to quit.
-
-This log is processed into a verifiable map which can be looked up using the following command:
-
-```shell
-go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --lookup=foo
-```
+Known applications:
+  - there is a basic end-to-end application written that supports SumDB in [trillian-examples](https://github.com/google/trillian-examples/tree/master/experimental/vindex/cmd)
+  - [./cmd/logandmap/](./cmd/logandmap/) contains a demo of running a [tlog-tiles][] log using [Tessera][], and keeping the contents of that log synced to a VIndex
 
 ## Milestones
 
