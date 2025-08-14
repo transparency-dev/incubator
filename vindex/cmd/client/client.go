@@ -18,8 +18,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,13 +31,18 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
+	"github.com/transparency-dev/merkle/proof"
+	"github.com/transparency-dev/merkle/rfc6962"
+	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
 
 var (
-	baseURL = flag.String("base_url", "", "The base URL of the vindex server.")
-	lookup  = flag.String("lookup", "", "The key to look up in the vindex.")
+	baseURL      = flag.String("base_url", "", "The base URL of the vindex server.")
+	lookup       = flag.String("lookup", "", "The key to look up in the vindex.")
+	outLogPubKey = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
 )
 
 func main() {
@@ -50,35 +57,15 @@ func run(ctx context.Context) error {
 	c := newVIndexClientFromFlags()
 
 	if *lookup == "" {
-		return errors.New("key flag must be provided")
+		return errors.New("lookup flag must be provided")
 	}
 
-	resp, err := c.Lookup(ctx, *lookup)
+	idxes, err := c.Lookup(ctx, *lookup)
 	if err != nil {
-		return fmt.Errorf("lookup for %q failed: %v", *lookup, err)
+		return fmt.Errorf("failed to look up key: %v", err)
 	}
 
-	// For now, pretty print the JSON response
-	jsonResp, err := json.MarshalIndent(resp, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal response: %v", err)
-	}
-	fmt.Println(string(jsonResp))
-
-	// This needs to verify the proofs in the response.
-	// We can't verify inclusion with the info we currently have.
-	// We at least need the index of the leaf returned. We could add
-	// that to the response object, but this is kinda rfc6962.
-	// What would it look like if the output log is tiled? What should
-	// the lookup response contain? Can it contain less, and thus put
-	// more on the client as per tlog-tiles? If so, what stops clients
-	// requesting old views of the index based on non-recent leaves from
-	// the output log?
-	// What if we flip this all around, and the OutputLog part of the response
-	// only returns an index into the output log, and the client has to look up
-	// that leaf, checkpoint, and generate inclusion proof?
-
-	// proof.VerifyInclusion()
+	fmt.Printf("Indices: %v", idxes)
 
 	return nil
 }
@@ -92,16 +79,75 @@ func newVIndexClientFromFlags() VIndexClient {
 		klog.Exitf("failed to parse URL: %v", err)
 	}
 	lookupURL := u.JoinPath(api.PathLookup)
+
+	if *outLogPubKey == "" {
+		klog.Exitf("out_log_pub_key must be provided")
+	}
+	outV, err := note.NewVerifier(*outLogPubKey)
+	if err != nil {
+		klog.Exitf("failed to construct output log verifier: %v", err)
+	}
 	return VIndexClient{
 		lookupURL: lookupURL,
+		outV:      outV,
 	}
 }
 
 type VIndexClient struct {
 	lookupURL *url.URL
+	outV      note.Verifier
 }
 
-func (c VIndexClient) Lookup(ctx context.Context, key string) (api.LookupResponse, error) {
+func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, error) {
+	resp, err := c.lookupUnverified(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("lookup for %q failed: %v", *lookup, err)
+	}
+
+	// Currently the response contains the RFC6962 style response type; leaf, proof, etc.
+	// What if we flip this all around, and the OutputLog part of the response
+	// only returns an index into the output log, and the client has to look up
+	// that leaf, checkpoint, and generate inclusion proof?
+
+	cp, _, _, err := log.ParseCheckpoint(resp.OutputLogCP, c.outV.Name(), c.outV)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse output log checkpoint: %v", err)
+	}
+	outLeafHash := rfc6962.DefaultHasher.HashLeaf(resp.OutputLogLeaf)
+	old := make([][]byte, len(resp.OutputLogProof))
+	for i := range old {
+		old[i] = resp.OutputLogProof[i][:]
+	}
+	oli := cp.Size - 1 // TODO(mhutchinson): include this in the response?
+	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, oli, cp.Size, outLeafHash[:], old, cp.Hash); err != nil {
+		return nil, fmt.Errorf("failed to verify inclusion in output log: %v", err)
+	}
+	var mapRoot []byte
+	if idx := bytes.Index(resp.OutputLogLeaf, []byte{'\n', '\n'}); idx < 0 {
+		return nil, fmt.Errorf("failed to parse output log leaf: %q", resp.OutputLogLeaf)
+	} else {
+		mapRoot = resp.OutputLogLeaf[:idx]
+		mapRoot, err = hex.AppendDecode(nil, mapRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode map root: %v", err)
+		}
+	}
+
+	idxLeafHash := sha256.New()
+	for _, idx := range resp.IndexValue {
+		if err := binary.Write(idxLeafHash, binary.BigEndian, idx); err != nil {
+			return nil, fmt.Errorf("failed to calculate leaf hash for indices: %v", err)
+		}
+	}
+	vindexLeafHash := idxLeafHash.Sum(nil)
+	vindexKeyHash := sha256.Sum256([]byte(key))
+	// TODO(mhutchinson): verify inclusion in the vindex!
+	klog.Warningf("TODO: confirm inclusion of leaf hash %x at key location %x with root hash %x", vindexLeafHash, vindexKeyHash, mapRoot)
+
+	return resp.IndexValue, nil
+}
+
+func (c VIndexClient) lookupUnverified(ctx context.Context, key string) (api.LookupResponse, error) {
 	var lookupResp api.LookupResponse
 
 	// For now, keys are stored under the hash of the key

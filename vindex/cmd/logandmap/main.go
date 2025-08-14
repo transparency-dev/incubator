@@ -255,13 +255,7 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 }
 
 func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) {
-	web := NewServer(func(h [sha256.Size]byte) ([]uint64, error) {
-		idxes, size := vi.Lookup(h)
-		if size == 0 {
-			return nil, errors.New("index not populated")
-		}
-		return idxes, nil
-	})
+	web := NewServer(vi.Lookup)
 
 	ilfs := http.FileServer(http.Dir(inLogDir))
 	olfs := http.FileServer(http.Dir(outLogDir))

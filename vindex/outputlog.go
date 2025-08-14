@@ -16,11 +16,15 @@ package vindex
 
 import (
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/tessera"
+	"github.com/transparency-dev/tessera/api"
+	"github.com/transparency-dev/tessera/client"
 	"github.com/transparency-dev/tessera/storage/posix"
 	"golang.org/x/mod/sumdb/note"
 )
@@ -34,7 +38,7 @@ func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v not
 
 	appender, shutdown, reader, err := tessera.NewAppender(ctx, driver, tessera.NewAppendOptions().
 		WithCheckpointSigner(s).
-		WithCheckpointInterval(5*time.Second).
+		WithCheckpointInterval(1*time.Second).
 		WithBatching(1, time.Second))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get appender: %v", err)
@@ -72,4 +76,38 @@ func (l posixOutputLog) Parse(cpRaw []byte) (*log.Checkpoint, error) {
 func (l posixOutputLog) Append(ctx context.Context, data []byte) (idx uint64, checkpoint []byte, err error) {
 	index, cp, err := l.w.Await(ctx, l.a.Add(ctx, tessera.NewEntry(data)))
 	return index.Index, cp, err
+}
+
+func (l posixOutputLog) Lookup(ctx context.Context, idx, size uint64) ([]byte, [][sha256.Size]byte, error) {
+	pb, err := client.NewProofBuilder(ctx, size, l.r.ReadTile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create proof builder: %v", err)
+	}
+	proof, err := pb.InclusionProof(ctx, idx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create proof: %v", err)
+	}
+	sizeFn := func(_ context.Context) (uint64, error) {
+		return size, nil
+	}
+
+	var data []byte
+	var done bool
+	for b := range client.EntryBundles(ctx, 1, sizeFn, l.r.ReadEntryBundle, idx, 1) {
+		if done {
+			panic(errors.New("got 2 entries, expected 1"))
+		}
+		var eb api.EntryBundle
+		if err := eb.UnmarshalText(b.Data); err != nil {
+			return nil, nil, fmt.Errorf("failed to unmarshal bundle: %v", err)
+		}
+		data = eb.Entries[b.RangeInfo.First]
+		done = true
+	}
+
+	proofRes := make([][sha256.Size]byte, len(proof))
+	for i, p := range proof {
+		proofRes[i] = [sha256.Size]byte(p)
+	}
+	return data, proofRes, nil
 }
