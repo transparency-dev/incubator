@@ -65,7 +65,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to look up key: %v", err)
 	}
 
-	fmt.Printf("Indices: %v", idxes)
+	fmt.Printf("Indices: %v\n", idxes)
 
 	return nil
 }
@@ -114,12 +114,12 @@ func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, error) 
 		return nil, fmt.Errorf("failed to parse output log checkpoint: %v", err)
 	}
 	outLeafHash := rfc6962.DefaultHasher.HashLeaf(resp.OutputLogLeaf)
-	old := make([][]byte, len(resp.OutputLogProof))
-	for i := range old {
-		old[i] = resp.OutputLogProof[i][:]
+	olp := make([][]byte, len(resp.OutputLogProof))
+	for i := range olp {
+		olp[i] = resp.OutputLogProof[i][:]
 	}
 	oli := cp.Size - 1 // TODO(mhutchinson): include this in the response?
-	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, oli, cp.Size, outLeafHash[:], old, cp.Hash); err != nil {
+	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, oli, cp.Size, outLeafHash[:], olp, cp.Hash); err != nil {
 		return nil, fmt.Errorf("failed to verify inclusion in output log: %v", err)
 	}
 	var mapRoot []byte

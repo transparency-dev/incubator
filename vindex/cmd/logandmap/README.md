@@ -1,6 +1,6 @@
 ## Verifiable Index: Log & Map
 
-This is a demo of using a [Tessera][] Verifiable Log as the Input Log, with all entries indexed into a [Verifiable Index](../../README.md).
+This is a demo of using a [Tessera][] Verifiable Log as the Input Log, with all entries indexed by a [Verifiable Index](../../README.md).
 
 [tlog-tiles]: https://c2sp.org/tlog-tiles
 [Tessera]: https://github.com/transparency-dev/tessera
@@ -24,8 +24,8 @@ i.e. the key that is put into the map has the following value:
 
 ```go
 		sha256.Sum256([]byte(entry.Module))
-
 ```
+
 This allows the owner of a given module to look up the modules they are responsible for, and verifiably
 find the index of all entries in the Input Log for their modules.
 
