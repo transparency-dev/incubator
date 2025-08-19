@@ -40,7 +40,7 @@ const (
 )
 
 func TestVerifiableIndex(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, v, err := fnote.NewEd25519SignerVerifier(skey)
 	if err != nil {
 		t.Fatal(err)
@@ -91,28 +91,28 @@ func TestVerifiableIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	idxes, size := vi.Lookup(sha256.Sum256([]byte("foo")))
-	if size != 4 {
-		t.Errorf("expected size 4 but got %d", size)
+	resp, err := vi.Lookup(t.Context(), sha256.Sum256([]byte("foo")))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if want := []uint64{0, 3}; !cmp.Equal(idxes, want) {
-		t.Errorf("expected %v but got %v", want, idxes)
-	}
-
-	idxes, size = vi.Lookup(sha256.Sum256([]byte("bar")))
-	if size != 4 {
-		t.Errorf("expected size 4 but got %d", size)
-	}
-	if want := []uint64{1, 2}; !cmp.Equal(idxes, want) {
-		t.Errorf("expected %v but got %v", want, idxes)
+	if got, want := resp.IndexValue, []uint64{0, 3}; !cmp.Equal(got, want) {
+		t.Errorf("expected %v but got %v", want, got)
 	}
 
-	idxes, size = vi.Lookup(sha256.Sum256([]byte("banana")))
-	if size != 4 {
-		t.Errorf("expected size 4 but got %d", size)
+	resp, err = vi.Lookup(t.Context(), sha256.Sum256([]byte("bar")))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if idxes != nil {
-		t.Errorf("expected no results but got %+v", idxes)
+	if got, want := resp.IndexValue, []uint64{1, 2}; !cmp.Equal(got, want) {
+		t.Errorf("expected %v but got %v", want, got)
+	}
+
+	resp, err = vi.Lookup(t.Context(), sha256.Sum256([]byte("banana")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.IndexValue != nil {
+		t.Errorf("expected no results but got %+v", resp.IndexValue)
 	}
 }
 

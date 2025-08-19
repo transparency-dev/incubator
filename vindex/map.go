@@ -25,11 +25,13 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -37,6 +39,7 @@ import (
 	"filippo.io/torchwood/mpt"
 	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
+	"github.com/transparency-dev/incubator/vindex/api"
 	"github.com/transparency-dev/merkle/compact"
 	"github.com/transparency-dev/merkle/rfc6962"
 	"k8s.io/klog/v2"
@@ -78,13 +81,9 @@ type OutputLog interface {
 	Parse(checkpoint []byte) (*log.Checkpoint, error)
 	// Append adds a new leaf and returns the checkpoint that commits to it.
 	Append(ctx context.Context, data []byte) (idx uint64, checkpoint []byte, err error)
+	// Lookup fetches the data, with a proof, at the given index and tree size.
+	Lookup(ctx context.Context, idx, size uint64) ([]byte, [][sha256.Size]byte, error)
 }
-
-// OpenCheckpointFn is a function that parses a checkpoint, validating it, and returns a parsed
-// checkpoint. This is expected to be a thin wrapper around log.ParseCheckpoint with the
-// validators set up according to the index operator's policy on the number of witnesses
-// required.
-type OpenCheckpointFn func(cpRaw []byte) (*log.Checkpoint, error)
 
 // NewVerifiableIndex returns an IndexBuilder that pulls entries from the given inputLog, determines
 // indices for each one using the mapFn, and then writes the entries out to a Write Ahead Log at the given
@@ -333,7 +332,7 @@ func (b *VerifiableIndex) Close() error {
 
 // Lookup returns the values stored for the given key.
 // TODO(mhutchinson): This needs to return verifiable stuff
-func (b *VerifiableIndex) Lookup(key [sha256.Size]byte) (indices []uint64, size uint64) {
+func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (api.LookupResponse, error) {
 	// Scope the lock to be as minimal as possible
 	lookupLocked := func(key [sha256.Size]byte) []uint64 {
 		b.indexMu.RLock()
@@ -341,19 +340,66 @@ func (b *VerifiableIndex) Lookup(key [sha256.Size]byte) (indices []uint64, size 
 		return b.data[key]
 	}
 
-	// TODO(mhutchinson): this should come from the latest map root in the (witnessed) output log.
-	// This map root, the witnessed output log checkpoint, and all proofs should also be served here.
-	size = b.servingSize
+	result := api.LookupResponse{}
 
-	allIndices := lookupLocked(key)
-	for i, idx := range allIndices {
-		if idx >= size {
-			// If we have indices past the current size we are serving, drop them.
-			// Doing this allows us to update b.data with new indices while still serving from it.
-			return allIndices[:i], size
+	olcp, err := b.outputLog.Checkpoint(ctx)
+	if err != nil {
+		return result, err
+	}
+	result.OutputLogCP = olcp
+	cp, err := b.outputLog.Parse(olcp)
+	if err != nil {
+		return result, err
+	}
+	if cp.Size == 0 {
+		return result, errors.New("map is empty")
+	}
+
+	data, proof, err := b.outputLog.Lookup(ctx, cp.Size-1, cp.Size)
+	if err != nil {
+		return result, fmt.Errorf("failed to lookup last leaf in output log: %v", err)
+	}
+
+	// Parse the output log entry to get the input log tree size that the vindex was built from.
+	var size uint64
+	if startPos := bytes.Index(data, []byte{'\n', '\n'}); startPos < 0 {
+		return result, fmt.Errorf("output leaf does not have expected format: %s", data)
+	} else {
+		working := data[2+startPos:]
+		if startPos = bytes.Index(working, []byte{'\n'}); startPos < 0 {
+			return result, fmt.Errorf("output leaf does not have expected format: %s", data)
+		}
+		working = working[1+startPos:]
+		endPos := bytes.Index(working, []byte{'\n'})
+		if endPos < 0 {
+			return result, fmt.Errorf("output leaf does not have expected format: %s", data)
+		}
+		working = working[:endPos]
+		sizeStr := string(working)
+		size, err = strconv.ParseUint(sizeStr, 10, 64)
+		if err != nil {
+			return result, fmt.Errorf("output leaf does not have expected format (found @ %d: %q):\n%s", startPos, sizeStr, data)
 		}
 	}
-	return allIndices, size
+
+	result.OutputLogLeaf = data
+	result.OutputLogProof = proof
+
+	allIndices := lookupLocked(key)
+
+	cutoff := slices.IndexFunc(allIndices, func(idx uint64) bool {
+		return idx >= size
+	})
+
+	if cutoff >= 0 {
+		result.IndexValue = allIndices[:cutoff]
+	}
+	result.IndexValue = allIndices
+
+	// TODO(filosottile): Generate proof for the vindex
+	result.IndexProof = nil
+
+	return result, nil
 }
 
 // Update checks the input log for a new Checkpoint, and ensures that the Verifiable Index
