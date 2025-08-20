@@ -58,5 +58,5 @@ Use left/right cursor to browse, and `q` to quit.
 This log is processed into a verifiable map which can be looked up using the following command:
 
 ```shell
-go run ./vindex/cmd/client --base_url http://localhost:8088/vindex/ --out_log_pub_key=example.com/outputlog+07392c46+AWyS8y8ZsRmQnTr6Fr2knaa8+t6CPYFh5Ho3wJEr14B8 --lookup=foo
+go run ./vindex/cmd/client --vindex_base_url http://localhost:8088/vindex/ --in_log_base_url http://localhost:8088/inputlog/ --out_log_pub_key=example.com/outputlog+07392c46+AWyS8y8ZsRmQnTr6Fr2knaa8+t6CPYFh5Ho3wJEr14B8 --in_log_pub_key=example.com/inputlog+bd6268fb+AWdGkrHKBm+pOubTrcBTV8JMDLFlF1Y8WUH1nrtLNXDr --lookup=foo
 ```

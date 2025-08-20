@@ -30,19 +30,25 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
 	"github.com/transparency-dev/merkle/proof"
 	"github.com/transparency-dev/merkle/rfc6962"
+	"github.com/transparency-dev/tessera/api/layout"
+	"github.com/transparency-dev/tessera/client"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
 
 var (
-	baseURL      = flag.String("base_url", "", "The base URL of the vindex server.")
-	lookup       = flag.String("lookup", "", "The key to look up in the vindex.")
-	outLogPubKey = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
+	vindexBaseURL = flag.String("vindex_base_url", "", "The base URL of the vindex server.")
+	inLogBaseURL  = flag.String("in_log_base_url", "", "The base URL of the input log.")
+	lookup        = flag.String("lookup", "", "The key to look up in the vindex.")
+	outLogPubKey  = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
+	inLogPubKey   = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint.")
+	minIdx        = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
 )
 
 func main() {
@@ -65,16 +71,43 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to look up key: %v", err)
 	}
 
-	fmt.Printf("Indices: %v\n", idxes)
+	if i := slices.IndexFunc(idxes, func(idx uint64) bool {
+		return idx >= *minIdx
+	}); i > 0 {
+		klog.Infof("Dropping %d pointers to index less than min_idx %d", i, *minIdx)
+		idxes = idxes[i:]
+	} else if i < 0 {
+		klog.Infof("Dropping %d pointers to index less than min_idx %d", len(idxes), *minIdx)
+		idxes = []uint64{}
+	}
+	if len(idxes) == 0 {
+		klog.Infof("No values found for key %q", *lookup)
+		return nil
+	}
+
+	lr, err := NewLeafReaderFromFlags(ctx)
+	if err != nil {
+		return err
+	}
+
+	klog.Infof("Dereferencing %d pointers", len(idxes))
+	for _, idx := range idxes {
+		leaf, err := lr.getLeaf(ctx, idx)
+		if err != nil {
+			klog.Errorf("failed to get leaf at index %d: %v", idx, err)
+			continue
+		}
+		fmt.Printf("%d)\n%s\n\n", idx, leaf)
+	}
 
 	return nil
 }
 
 func newVIndexClientFromFlags() VIndexClient {
-	if *baseURL == "" {
-		klog.Exit("base_url flag must be provided")
+	if *vindexBaseURL == "" {
+		klog.Exit("vindex_base_url flag must be provided")
 	}
-	u, err := url.Parse(*baseURL)
+	u, err := url.Parse(*vindexBaseURL)
 	if err != nil {
 		klog.Exitf("failed to parse URL: %v", err)
 	}
@@ -182,4 +215,86 @@ func (c VIndexClient) lookupUnverified(ctx context.Context, key string) (api.Loo
 		return lookupResp, fmt.Errorf("failed to unmarshal response: %v", err)
 	}
 	return lookupResp, nil
+}
+
+func NewLeafReaderFromFlags(ctx context.Context) (*LeafReader, error) {
+	inV, err := note.NewVerifier(*inLogPubKey)
+	if err != nil {
+		klog.Exitf("failed to construct input log verifier: %v", err)
+	}
+
+	if *inLogBaseURL == "" {
+		klog.Exit("in_log_base_url flag must be provided")
+	}
+	u, err := url.Parse(*inLogBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %v", err)
+	}
+	c, err := client.NewHTTPFetcher(u, http.DefaultClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP fetcher for %q: %v", u, err)
+	}
+
+	cpRaw, err := c.ReadCheckpoint(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read checkpoint from input log: %v", err)
+	}
+	cp, _, _, err := log.ParseCheckpoint(cpRaw, inV.Name(), inV)
+	if err != nil {
+		klog.Warning(string(cpRaw))
+		return nil, fmt.Errorf("failed to parse input log checkpoint: %v", err)
+	}
+	lr := &LeafReader{
+		f:  c.ReadEntryBundle,
+		cp: cp,
+	}
+	return lr, nil
+}
+
+// LeafReader reads leaves from the tree.
+// This class is not thread safe.
+type LeafReader struct {
+	f  client.EntryBundleFetcherFunc
+	cp *log.Checkpoint
+	c  leafBundleCache
+}
+
+// getLeaf fetches the raw contents committed to at a given leaf index.
+func (r *LeafReader) getLeaf(ctx context.Context, i uint64) ([]byte, error) {
+	if i >= r.cp.Size {
+		return nil, fmt.Errorf("requested leaf %d >= log size %d", i, r.cp.Size)
+	}
+	if cached, _ := r.c.get(i); cached != nil {
+		klog.V(2).Infof("Using cached result for index %d", i)
+		return cached, nil
+	}
+
+	// TODO(mhutchinson): Check the inclusion proof of a fetched bundle
+	bundle, err := client.GetEntryBundle(ctx, r.f, i/layout.EntryBundleWidth, r.cp.Size)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get entry bundle: %v", err)
+	}
+	ti := i % layout.EntryBundleWidth
+	r.c = leafBundleCache{
+		start:  i - ti,
+		leaves: bundle.Entries,
+	}
+	return r.c.leaves[ti], nil
+}
+
+// leafBundleCache stores the results of the last fetched tile. Assuming that the client
+// accesses leaves in order, then this avoids fetching the same bundle multiple times if
+// multiple leaves are in the same bundle.
+type leafBundleCache struct {
+	start  uint64
+	leaves [][]byte
+}
+
+func (tc leafBundleCache) get(i uint64) ([]byte, error) {
+	end := tc.start + uint64(len(tc.leaves))
+	if i >= tc.start && i < end {
+		leaf := tc.leaves[i-tc.start]
+		return leaf, nil
+	}
+	return nil, errors.New("not found")
 }
