@@ -3,7 +3,7 @@ module github.com/transparency-dev/incubator
 go 1.24.1
 
 require (
-	filippo.io/torchwood v0.5.1-0.20250605130057-fa65d721a6ce
+	filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
@@ -47,7 +47,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	golang.org/x/crypto v0.40.0 // indirect
-	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
+	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.27.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect

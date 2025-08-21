@@ -1,5 +1,9 @@
+filippo.io/torchwood v0.5.0 h1:oxWysaH9n3glAq1aVL+YVLN1M84DlKSuypXUCNKEzAo=
+filippo.io/torchwood v0.5.0/go.mod h1:gXGeXk8RYIxJDOadfRUonXDtXWNssnGkEDDrOFrhzx0=
 filippo.io/torchwood v0.5.1-0.20250605130057-fa65d721a6ce h1:8bVOhkZ6uQn3qCmrz/F7Rz0epygH9KO3dgbS9g/zclk=
 filippo.io/torchwood v0.5.1-0.20250605130057-fa65d721a6ce/go.mod h1:n82QaQC2EzvctEMkM1KAahZaAcQ2uZoCdn051sUXOQY=
+filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2 h1:H4ha4iGbm5VltuTnAG9MIfiScJZJiK/db+w2uLVOjbU=
+filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2/go.mod h1:Z+iz3Syg0RCaVkL9nBjG2STp/9HpuFl1+SbaNSZ/Ez8=
 github.com/DataDog/zstd v1.4.5 h1:EndNeuB0l9syBZhut0wns3gV1hL8zX8LIu6ZiVHWLIQ=
 github.com/DataDog/zstd v1.4.5/go.mod h1:1jcaCB/ufaK+sKp1NBhlGmpz41jOoPQ35bpF36t7BBo=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
@@ -105,6 +109,7 @@ golang.org/x/crypto v0.40.0 h1:r4x+VvoG5Fm+eJcxMaY8CQM7Lb0l1lsmjGBQ6s8BfKM=
 golang.org/x/crypto v0.40.0/go.mod h1:Qr1vMER5WyS2dfPHAlsOj01wgLbsyWtFn/aY+5+ZdxY=
 golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 h1:aAcj0Da7eBAtrTp03QXWvm88pSyOt+UgdZw2BFZ+lEw=
 golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8/go.mod h1:CQ1k9gNrJ50XIzaKCRR2hssIjF07kZFEiieALBM/ARQ=
+golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0/go.mod h1:S9Xr4PYopiDyqSyp5NjCrhFrqg6A5zA2E/iPHPhqnS8=
 golang.org/x/mod v0.2.0/go.mod h1:s0Qsj1ACt9ePp/hMypM3fl4fZqREWJwdYDEqhRiZZUA=
 golang.org/x/mod v0.3.0/go.mod h1:s0Qsj1ACt9ePp/hMypM3fl4fZqREWJwdYDEqhRiZZUA=
 golang.org/x/mod v0.27.0 h1:kb+q2PyFnEADO2IEF935ehFUXlWiNjJWtRNgBLSfbxQ=
