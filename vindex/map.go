@@ -36,7 +36,7 @@ import (
 	"sync"
 	"time"
 
-	"filippo.io/torchwood/mpt"
+	"filippo.io/torchwood/prefix"
 	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
@@ -150,8 +150,8 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 	if err != nil {
 		return nil, err
 	}
-	vtreeStorage := mpt.NewMemoryStorage()
-	if err := mpt.InitStorage(sha256.Sum256, vtreeStorage); err != nil {
+	vtreeStorage := prefix.NewMemoryStorage()
+	if err := prefix.InitStorage(ctx, sha256.Sum256, vtreeStorage); err != nil {
 		return nil, fmt.Errorf("InitStorage: %s", err)
 	}
 	mapper := &inputLogMapper{
@@ -166,7 +166,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		walReader: reader,
 		db:        db,
 		outputLog: outputLog,
-		vindex:    *mpt.NewTree(sha256.Sum256, vtreeStorage),
+		vindex:    *prefix.NewTree(sha256.Sum256, vtreeStorage),
 		vstore:    vtreeStorage,
 		data:      map[[sha256.Size]byte][]uint64{},
 	}
@@ -315,8 +315,8 @@ type VerifiableIndex struct {
 	outputLog OutputLog
 
 	indexMu sync.RWMutex // covers vindex and data
-	vindex  mpt.Tree
-	vstore  mpt.Storage
+	vindex  prefix.Tree
+	vstore  prefix.Storage
 	data    map[[sha256.Size]byte][]uint64
 
 	// servingSize is the size of the input log we are serving for.
@@ -431,7 +431,7 @@ func (b *VerifiableIndex) publish(ctx context.Context) error {
 	}
 
 	// Construct the leaf for the output log
-	rootNode, err := b.vstore.Load(mpt.RootLabel)
+	rootNode, err := b.vstore.Load(ctx, prefix.RootLabel)
 	if err != nil {
 		return fmt.Errorf("failed to load vindex root: %v", err)
 	}
@@ -543,7 +543,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 		}
 
 		// Finally, we update the vindex
-		if err := b.vindex.Insert(h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
+		if err := b.vindex.Insert(ctx, h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
 			return fmt.Errorf("Insert(): %s", err)
 		}
 	}
