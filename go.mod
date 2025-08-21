@@ -3,7 +3,7 @@ module github.com/transparency-dev/incubator
 go 1.24.1
 
 require (
-	filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2
+	filippo.io/torchwood v0.5.1-0.20250821141945-7cf4555d7644
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
