@@ -44,8 +44,15 @@ type LookupResponse struct {
 	// These values represent the lookup operation in the index at the root hash
 	// committed to by OutputLogLeaf. The values contain all indices for the given
 	// key, and the proof binds these values at this key at the index root hash.
-	IndexValue []uint64            `json:"index_value"`
-	IndexProof [][sha256.Size]byte `json:"index_proof"`
+	IndexValue []uint64    `json:"index_value"`
+	IndexProof []IndexNode `json:"index_proof"`
+}
+
+// IndexNode is a node in the Verifiable Index.
+type IndexNode struct {
+	LabelBitLen uint32            `json:"label_bit_len"`
+	LabelPath   []byte            `json:"label_path"`
+	Hash        [sha256.Size]byte `json:"hash"`
 }
 
 // OutputLogLeaf describes a leaf in the output log.

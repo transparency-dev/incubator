@@ -32,6 +32,7 @@ import (
 	"net/url"
 	"slices"
 
+	"filippo.io/torchwood/prefix"
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
 	"github.com/transparency-dev/merkle/proof"
@@ -141,7 +142,8 @@ type VIndexClient struct {
 // TODO(mhutchinson): maybe this should return the Input Log Checkpoint that was committed to in
 // the Output Log leaf?
 func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, error) {
-	resp, err := c.lookupUnverified(ctx, key)
+	kh := sha256.Sum256([]byte(key))
+	resp, err := c.lookupUnverified(ctx, kh)
 	if err != nil {
 		return nil, fmt.Errorf("lookup for %q failed: %v", *lookup, err)
 	}
@@ -182,18 +184,36 @@ func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, error) 
 		}
 	}
 	vindexLeafHash := idxLeafHash.Sum(nil)
-	vindexKeyHash := sha256.Sum256([]byte(key))
-	// TODO(mhutchinson): verify inclusion in the vindex!
-	klog.Warningf("TODO: confirm inclusion of leaf hash %x at key location %x with root hash %x", vindexLeafHash, vindexKeyHash, mapRoot)
+
+	pns := make([]prefix.ProofNode, len(resp.IndexProof))
+	for i, p := range resp.IndexProof {
+		label, err := prefix.NewLabel(p.LabelBitLen, p.LabelPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create label: %v", err)
+		}
+		pns[i] = prefix.ProofNode{
+			Label: label,
+			Hash:  p.Hash,
+		}
+	}
+
+	if len(resp.IndexValue) > 0 {
+		if err := prefix.VerifyMembershipProof(sha256.Sum256, kh, [32]byte(vindexLeafHash), pns, [32]byte(mapRoot)); err != nil {
+			return nil, fmt.Errorf("failed to verify membership: %v", err)
+		}
+	} else {
+		if err := prefix.VerifyNonMembershipProof(sha256.Sum256, kh, pns, [32]byte(mapRoot)); err != nil {
+			return nil, fmt.Errorf("failed to verify non-membership: %v", err)
+		}
+	}
 
 	return resp.IndexValue, nil
 }
 
-func (c VIndexClient) lookupUnverified(ctx context.Context, key string) (api.LookupResponse, error) {
+func (c VIndexClient) lookupUnverified(ctx context.Context, kh [sha256.Size]byte) (api.LookupResponse, error) {
 	var lookupResp api.LookupResponse
 
 	// For now, keys are stored under the hash of the key
-	kh := sha256.Sum256([]byte(key))
 	u := c.lookupURL.JoinPath(hex.EncodeToString(kh[:]))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

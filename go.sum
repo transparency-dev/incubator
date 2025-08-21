@@ -1,5 +1,5 @@
-filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2 h1:H4ha4iGbm5VltuTnAG9MIfiScJZJiK/db+w2uLVOjbU=
-filippo.io/torchwood v0.5.1-0.20250821112833-13ed7b69c1e2/go.mod h1:Z+iz3Syg0RCaVkL9nBjG2STp/9HpuFl1+SbaNSZ/Ez8=
+filippo.io/torchwood v0.5.1-0.20250821141945-7cf4555d7644 h1:xPQ8RTWOsXdseR4XG7RRuERLvJOBcbjMohcZ66Nj2AY=
+filippo.io/torchwood v0.5.1-0.20250821141945-7cf4555d7644/go.mod h1:Z+iz3Syg0RCaVkL9nBjG2STp/9HpuFl1+SbaNSZ/Ez8=
 github.com/DataDog/zstd v1.4.5 h1:EndNeuB0l9syBZhut0wns3gV1hL8zX8LIu6ZiVHWLIQ=
 github.com/DataDog/zstd v1.4.5/go.mod h1:1jcaCB/ufaK+sKp1NBhlGmpz41jOoPQ35bpF36t7BBo=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=

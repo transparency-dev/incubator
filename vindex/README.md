@@ -197,7 +197,7 @@ Known applications:
 |  3  | Incremental update                                        |   ✅   |
 |  4  | Verify that mapped data matches Input Log Checkpoint      |   ✅   |
 |  5  | Output log                                                |   ✅   |
-|  6  | Proofs served on Lookup                                   |   ❌   |
+|  6  | Proofs served on Lookup                                   |   ✅   |
 |  7  | Storage backed verifiable-map                             |   ❌   |
 |  8  | MapFn defined in WASM                                     |   ❌   |
 |  9  | Support reading directly from Input Log instead of Clone  |   ✅   |
