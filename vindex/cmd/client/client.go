@@ -131,6 +131,15 @@ type VIndexClient struct {
 	outV      note.Verifier
 }
 
+// Lookup returns all indices, in ascending order, where the given key appears in the Input Log.
+// This will be verified before being returned from this method, so a caller can be assured that
+// any results (including the empty slice, i.e. non-presence) were found in the verifiable index,
+// and committed to by the output log.
+//
+// Note that it is up to the caller to ensure that any leaves looked up in the Input Log are
+// verified by an inclusion proof.
+// TODO(mhutchinson): maybe this should return the Input Log Checkpoint that was committed to in
+// the Output Log leaf?
 func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, error) {
 	resp, err := c.lookupUnverified(ctx, key)
 	if err != nil {
@@ -264,7 +273,7 @@ func (r *LeafReader) getLeaf(ctx context.Context, i uint64) ([]byte, error) {
 	if i >= r.cp.Size {
 		return nil, fmt.Errorf("requested leaf %d >= log size %d", i, r.cp.Size)
 	}
-	if cached, _ := r.c.get(i); cached != nil {
+	if cached := r.c.get(i); cached != nil {
 		klog.V(2).Infof("Using cached result for index %d", i)
 		return cached, nil
 	}
@@ -290,11 +299,11 @@ type leafBundleCache struct {
 	leaves [][]byte
 }
 
-func (tc leafBundleCache) get(i uint64) ([]byte, error) {
+func (tc leafBundleCache) get(i uint64) []byte {
 	end := tc.start + uint64(len(tc.leaves))
 	if i >= tc.start && i < end {
 		leaf := tc.leaves[i-tc.start]
-		return leaf, nil
+		return leaf
 	}
-	return nil, errors.New("not found")
+	return nil
 }
