@@ -396,8 +396,21 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	}
 	result.IndexValue = allIndices
 
-	// TODO(filosottile): Generate proof for the vindex
-	result.IndexProof = nil
+	found, viProof, err := b.vindex.Lookup(ctx, key)
+	if err != nil {
+		return result, fmt.Errorf("failed to get inclusion proof from vindex: %v", err)
+	}
+	if expectFound := len(allIndices) > 0; expectFound != found {
+		return result, fmt.Errorf("found = %t, but expected %t (number of indices: %d)", found, expectFound, len(allIndices))
+	}
+	result.IndexProof = make([]api.IndexNode, len(viProof))
+	for i, p := range viProof {
+		result.IndexProof[i] = api.IndexNode{
+			LabelBitLen: p.Label.BitLen(),
+			LabelPath:   p.Label.Bytes(),
+			Hash:        p.Hash,
+		}
+	}
 
 	return result, nil
 }
