@@ -17,6 +17,7 @@ package vindex
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -110,4 +111,27 @@ func (l posixOutputLog) Lookup(ctx context.Context, idx, size uint64) ([]byte, [
 		proofRes[i] = [sha256.Size]byte(p)
 	}
 	return data, proofRes, nil
+}
+
+// MarshalLeaf creates the leaf to be committed to the Output Log given the root hash
+// of the verifiable index, and the checkpoint from the Input Log.
+func MarshalLeaf(vindexRootHash [sha256.Size]byte, inLogCp []byte) []byte {
+	m := append(hex.AppendEncode(nil, vindexRootHash[:]), '\n')
+	m = append(m, inLogCp...)
+	return m
+}
+
+// UnmarshalLeaf returns the root hash of the Verifiable Index and the checkpoint from the
+// Input Log by unmarshalling a leaf from the Output Log, previously marshalled with
+// MarshalLeaf.
+func UnmarshalLeaf(leaf []byte) ([sha256.Size]byte, []byte, error) {
+	split := hex.EncodedLen(sha256.Size)
+	if split > len(leaf) {
+		return [sha256.Size]byte{}, nil, fmt.Errorf("failed to parse output log leaf: %q", leaf)
+	}
+	mapRoot, err := hex.AppendDecode(nil, leaf[:split])
+	if err != nil {
+		return [sha256.Size]byte{}, nil, fmt.Errorf("failed to decode map root: %v", err)
+	}
+	return [32]byte(mapRoot), leaf[split+1:], nil
 }
