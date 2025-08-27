@@ -3,6 +3,7 @@ module github.com/transparency-dev/incubator
 go 1.25.0
 
 require (
+	filippo.io/sunlight v0.8.0
 	filippo.io/torchwood v0.9.1-0.20260708154658-e0a6396dd50c
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/go-git/go-git/v5 v5.19.1
@@ -16,7 +17,9 @@ require (
 	go.opentelemetry.io/otel/exporters/prometheus v0.66.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/mod v0.38.0
+	golang.org/x/net v0.55.0
 	golang.org/x/sync v0.22.0
 	k8s.io/klog/v2 v2.140.0
 )
@@ -46,6 +49,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/google/certificate-transparency-go v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
@@ -69,9 +73,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect
-	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
