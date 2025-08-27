@@ -17,6 +17,8 @@
 package vindex
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"os"
 	"testing"
 
@@ -104,5 +106,23 @@ func TestOutputLog_Lookup(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestOutpuLogLeafRoundtrip(t *testing.T) {
+	inH := sha256.Sum256([]byte("test123"))
+	inCp := []byte("example.com/test\n123\ndeadbeef")
+
+	leaf := MarshalLeaf(inH, inCp)
+
+	outH, outCp, err := UnmarshalLeaf(leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(outCp, inCp) {
+		t.Errorf("expected %x but got %x", inCp, outCp)
+	}
+	if !bytes.Equal(inH[:], outH[:]) {
+		t.Errorf("expected %x but got %x", inH, outH)
 	}
 }

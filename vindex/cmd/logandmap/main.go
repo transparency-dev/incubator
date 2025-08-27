@@ -75,6 +75,7 @@ type LogEntry struct {
 }
 
 func run(ctx context.Context) error {
+	// Set up storage for the input log, index, and output log.
 	if *storageDir == "" {
 		return errors.New("storage_dir must be set")
 	}
@@ -92,6 +93,8 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to create vindex directory: %v", err)
 	}
 
+	// Create the input log, output log, and verifiable index.
+	// The input log is continuously getting new leaves written to it.
 	inputLog, inputCloser := inputLogOrDie(ctx, inputLogDir)
 	defer inputCloser()
 
@@ -103,10 +106,10 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
 
-	// Keeps the map synced with the latest published log state.
+	// Keeps the map synced with the latest published input log state.
 	go maintainMap(ctx, vi)
 
-	// Run a web server to handle queries over the verifiable index.
+	// Run a web server to serve the input log, index, and output log.
 	go runWebServer(vi, inputLogDir, outputLogDir)
 	<-ctx.Done()
 	return nil

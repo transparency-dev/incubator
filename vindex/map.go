@@ -24,7 +24,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -193,11 +192,6 @@ func (m *inputLogMapper) close() error {
 
 // syncFromInputLog reads the latest checkpoint from the input log, and ensures that the WAL
 // contains a corresponding entry for every index committed to by that checkpoint.
-//
-// TODO(mhutchinson): this doesn't perform any validation on the input log to check the
-// leaves correspond to the checkpoint root hash. This was reasonable while it was based on the
-// cloneDB, which performed this validation. Implementing this will require the index to store some
-// state alongside the WAL which contains a compact range of its current progress.
 func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 	rawCp, err := m.inputLog.Checkpoint(ctx)
 	if err != nil {
@@ -331,7 +325,6 @@ func (b *VerifiableIndex) Close() error {
 }
 
 // Lookup returns the values stored for the given key.
-// TODO(mhutchinson): This needs to return verifiable stuff
 func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (api.LookupResponse, error) {
 	// Scope the lock to be as minimal as possible
 	lookupLocked := func(key [sha256.Size]byte) []uint64 {
@@ -361,25 +354,13 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	}
 
 	// Parse the output log entry to get the input log tree size that the vindex was built from.
-	var size uint64
-	if startPos := bytes.Index(data, []byte{'\n', '\n'}); startPos < 0 {
-		return result, fmt.Errorf("output leaf does not have expected format: %s", data)
-	} else {
-		working := data[2+startPos:]
-		if startPos = bytes.Index(working, []byte{'\n'}); startPos < 0 {
-			return result, fmt.Errorf("output leaf does not have expected format: %s", data)
-		}
-		working = working[1+startPos:]
-		endPos := bytes.Index(working, []byte{'\n'})
-		if endPos < 0 {
-			return result, fmt.Errorf("output leaf does not have expected format: %s", data)
-		}
-		working = working[:endPos]
-		sizeStr := string(working)
-		size, err = strconv.ParseUint(sizeStr, 10, 64)
-		if err != nil {
-			return result, fmt.Errorf("output leaf does not have expected format (found @ %d: %q):\n%s", startPos, sizeStr, data)
-		}
+	_, inCp, err := UnmarshalLeaf(data)
+	if err != nil {
+		return result, fmt.Errorf("failed to unmarshal output leaf: %v", err)
+	}
+	_, size, _, err := checkpointUnsafe(inCp)
+	if err != nil {
+		return result, fmt.Errorf("failed to unmarshal input log checkpoint from output leaf: %v", err)
 	}
 
 	result.OutputLogLeaf = data
@@ -448,10 +429,7 @@ func (b *VerifiableIndex) publish(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to load vindex root: %v", err)
 	}
-	leaf := append(hex.AppendEncode(nil, rootNode.Hash[:]), '\n', '\n')
-	leaf = append(leaf, inCp...)
-
-	outIdx, rawCp, err := b.outputLog.Append(ctx, leaf)
+	outIdx, rawCp, err := b.outputLog.Append(ctx, MarshalLeaf(rootNode.Hash, inCp))
 	if err != nil {
 		return fmt.Errorf("failed to append to output log: %v", err)
 	}
@@ -474,10 +452,15 @@ func (b *VerifiableIndex) publish(ctx context.Context) error {
 
 // buildMap reads from the WAL until the file has been consumed and the map has been
 // built up the provided size.
+// TODO(mhutchinson): tighten the semantics here. What is the provided size?
+// It does double duty: rebuilding the log to a previous size (output log): this doesn't
+// need to update the OL, but normal usage should in the mutex as described below.
 func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	startWal := time.Now()
-	updatedKeys := make(map[[sha256.Size]byte]bool) // Allows us to efficiently update vindex after first init
+	updatedKeys := make(map[[sha256.Size]byte]struct{}) // Allows us to efficiently update vindex after first init
 
+	// Load the last input log checkpoint we synced to, verified, and flushed the mapped
+	// entries into the WAL.
 	cpRaw, closer, err := b.db.Get([]byte(dbLatestCheckpointKey))
 	if err != nil {
 		if err == pebble.ErrNotFound {
@@ -523,7 +506,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 				idxes := b.data[h]
 				idxes = append(idxes, idx)
 				b.data[h] = idxes
-				updatedKeys[h] = true
+				updatedKeys[h] = struct{}{}
 			}
 		}()
 	}
