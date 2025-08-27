@@ -124,7 +124,7 @@ This would be used similarly to:
 var i uint64 // the index currently being processed. Needs to be set to non-zero if log started mid-way through.
 var log chan []byte // channel on which leaves from the log will be written
 var mapFn MapFn // initialized somehow (maybe loading wasm)
-var output func(i uint64, mapKeys ...[][]byte) // probably just writes the the write ahead log
+var output func(i uint64, mapKeys ...[][]byte) // probably just writes the write ahead log
 
 for leaf := <- log {
   mapKeys := mapFn(leaf)
