@@ -36,6 +36,7 @@ import (
 	"time"
 
 	"filippo.io/torchwood/prefix"
+	"filippo.io/torchwood/prefix/prefixsqlite"
 	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
@@ -149,7 +150,10 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 	if err != nil {
 		return nil, err
 	}
-	vtreeStorage := prefix.NewMemoryStorage()
+	vtreeStorage, err := prefixsqlite.NewSQLiteStorage(ctx, path.Join(rootDir, "vindex.db"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SQL storage: %v", err)
+	}
 	if err := prefix.InitStorage(ctx, sha256.Sum256, vtreeStorage); err != nil {
 		return nil, fmt.Errorf("InitStorage: %s", err)
 	}
