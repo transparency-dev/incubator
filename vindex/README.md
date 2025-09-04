@@ -104,40 +104,34 @@ The verifier builds a map at the same size as the verifiable index and if the ma
 
 ### MapFn Specified in Universal Language
 
+The verifiable index is constructed by taking each leaf in turn from the Input Log.
+Each leaf entry is "mapped" (the terminology is borrowed from [MapReduce](https://en.wikipedia.org/wiki/MapReduce#Map_function)), which outputs all of the locations in the index that this leaf should be found.
+For example, in CT this would take a `[]byte`, parse it as a certificate, and output the domains that this cert covers.
+
 Being able to specify which keys are relevant to any particular entry in the log is critical to allow a verifier to check for correct construction of the map. Ideally this MapFn would be specified in a universal way, to allow the verifier to be running a different technology stack than the core map operator. i.e. having the Go implementation be the specification is undesirable, as it puts a lot of tax on the verifier to reproduce this behaviour identically in another environment.
 
-Some options:
+The current plan is to use WASM ([go docs](https://go.dev/wiki/WebAssembly)), however other options could be considered (e.g. a formal spec, or a functional language that can be transpiled).
 
-* WASM ([go docs](https://go.dev/wiki/WebAssembly))  
-* Formal spec  
-* Functional language that can be transpiled
-
-In any case, the MapFn functionally needs to be of the form:
+The current implementation in [map.go](./map.go) takes a `MapFn` interface:
 
 ```
-type MapFn func([]byte) [][]byte
+// MapFn takes the raw leaf data from a log entry and outputs the SHA256 hashes
+// of the keys at which this leaf should be indexed under.
+// A leaf can be recorded at any number of entries, including no entries (in which case an empty slice must be returned).
+//
+// MapFn is expected to consume any error states that it encounters in some way that
+// makes sense to the particular ecosystem. This might mean outputting any invalid leaves
+// at a known locations (e.g. all 0s), or not outputting any entry. Any panics will cause
+// the mapping process to terminate.
+type MapFn func([]byte) [][sha256.Size]byte
 ```
 
-This would be used similarly to:
-
-```
-var i uint64 // the index currently being processed. Needs to be set to non-zero if log started mid-way through.
-var log chan []byte // channel on which leaves from the log will be written
-var mapFn MapFn // initialized somehow (maybe loading wasm)
-var output func(i uint64, mapKeys ...[][]byte) // probably just writes the write ahead log
-
-for leaf := <- log {
-  mapKeys := mapFn(leaf)
-  output(i, mapKeys...)
-  i++
-}
-```
-
-i.e. consume each entry in the log, apply the map function in order to determine the keys to update, and then output this operation to the next stage of the pipeline.
+Clients currently pass in implementations purely written in Go, however the [Milestones](#milestones) tracks adding WASM support.
 
 > [!IMPORTANT]
 > This describes the MapFn as returning key hashes.
 > We _may_ want to have the map return the raw key (e.g. `maps.google.com`) so that a prefix trie can be constructed.
+> See https://github.com/transparency-dev/incubator/issues/33 for discussion and to provide feedback.
 
 > [!IMPORTANT]
 > The `MapFn` is fixed for the life of the Verifiable Index.
