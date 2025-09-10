@@ -82,7 +82,7 @@ func TestVerifiableIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closer()
-	vi, err := NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name())
+	vi, err := NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

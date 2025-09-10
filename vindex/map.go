@@ -85,12 +85,16 @@ type OutputLog interface {
 	Lookup(ctx context.Context, idx, size uint64) ([]byte, [][sha256.Size]byte, error)
 }
 
+type Options struct {
+	PersistIndex bool
+}
+
 // NewVerifiableIndex returns an IndexBuilder that pulls entries from the given inputLog, determines
 // indices for each one using the mapFn, and then writes the entries out to a Write Ahead Log at the given
 // path.
 // Note that only one IndexBuilder should exist for any given walPath at any time. The behaviour is unspecified,
 // but likely broken, if multiple processes are writing to the same file at any given time.
-func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, outputLog OutputLog, rootDir string) (*VerifiableIndex, error) {
+func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, outputLog OutputLog, rootDir string, opts Options) (*VerifiableIndex, error) {
 	stateDir := path.Join(rootDir, "state")
 	if err := os.MkdirAll(stateDir, 0o755); err != nil {
 		return nil, err
@@ -134,7 +138,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		for i := range crHashes {
 			crHashes[i] = crBs[i*sha256.Size : (i+1)*sha256.Size]
 		}
-		klog.Infof("Loaded state: size=%d, hashes=%d", size, len(crHashes))
+		klog.V(1).Infof("Loaded compact range state from PebbleDB: size=%d, hashes=%d", size, len(crHashes))
 		cr, err = crf.NewRange(0, size, crHashes)
 		if err != nil {
 			return nil, fmt.Errorf("NewRange: %v", err)
@@ -150,7 +154,13 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 	if err != nil {
 		return nil, err
 	}
-	vtreeStorage, err := prefixsqlite.NewSQLiteStorage(ctx, path.Join(rootDir, "vindex.db"))
+
+	var vtreeStorage prefix.Storage
+	if opts.PersistIndex {
+		vtreeStorage, err = prefixsqlite.NewSQLiteStorage(ctx, path.Join(rootDir, "vindex.db"))
+	} else {
+		vtreeStorage = prefix.NewMemoryStorage()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to create SQL storage: %v", err)
 	}
@@ -173,7 +183,8 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		vstore:    vtreeStorage,
 		data:      map[[sha256.Size]byte][]uint64{},
 	}
-	if err := b.buildMap(ctx); err != nil {
+	// If we persisted the index then we don't need to rebuild it
+	if err := b.buildMap(ctx, !opts.PersistIndex); err != nil {
 		return nil, fmt.Errorf("failed to build map: %v", err)
 	}
 	return b, nil
@@ -210,11 +221,29 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 		return nil
 	}
 
-	if m.r.End() < cp.Size {
+	for m.r.End() < cp.Size {
 		ctx, done := context.WithCancel(ctx)
 		defer done()
+		r := reporter{
+			lastReported: m.r.End(),
+			lastReport:   time.Now(),
+			treeSize:     cp.Size,
+		}
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					r.report()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 		for l, err := range m.inputLog.Leaves(ctx, m.r.End(), cp.Size) {
 			idx := m.r.End()
+			workDone := r.trackWork(idx)
 			if err != nil {
 				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
 			}
@@ -241,6 +270,7 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 			if mapErr != nil {
 				return mapErr
 			}
+			workDone()
 
 			storeCompactRange := m.r.End()%256 == 0 || m.r.End() == cp.Size
 			if len(hashes) == 0 && !storeCompactRange {
@@ -268,6 +298,10 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 	}
 	if err := m.walWriter.flush(); err != nil {
 		return fmt.Errorf("failed to flush: %v", err)
+	}
+
+	if m.r.End() != cp.Size {
+		return fmt.Errorf("synced to tree size %d but compact range ends at %d", cp.Size, m.r.End())
 	}
 
 	// Calculate the root hash, and if it checks out, store the checkpoint to indicate safety.
@@ -407,7 +441,7 @@ func (b *VerifiableIndex) Update(ctx context.Context) error {
 	if err := b.mapper.syncFromInputLog(ctx); err != nil {
 		return err
 	}
-	if err := b.buildMap(ctx); err != nil {
+	if err := b.buildMap(ctx, true); err != nil {
 		return err
 	}
 	return b.publish(ctx)
@@ -459,7 +493,7 @@ func (b *VerifiableIndex) publish(ctx context.Context) error {
 // TODO(mhutchinson): tighten the semantics here. What is the provided size?
 // It does double duty: rebuilding the log to a previous size (output log): this doesn't
 // need to update the OL, but normal usage should in the mutex as described below.
-func (b *VerifiableIndex) buildMap(ctx context.Context) error {
+func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error {
 	startWal := time.Now()
 	updatedKeys := make(map[[sha256.Size]byte]struct{}) // Allows us to efficiently update vindex after first init
 
@@ -481,6 +515,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 		return fmt.Errorf("failed to parse checkpoint: %v", err)
 	}
 
+	klog.V(1).Infof("buildMap [%d, %d): parsing WAL", b.servingSize, size)
 	for i := b.servingSize; i < size; {
 		select {
 		case <-ctx.Done():
@@ -517,34 +552,37 @@ func (b *VerifiableIndex) buildMap(ctx context.Context) error {
 	durationWal := time.Since(startWal)
 
 	startVIndex := time.Now()
-	// Build the verifiable index _afterwards_ for several reasons:
-	//  1) doing this incrementally leads to a lot of duplicate work for keys with multiple values
-	//  2) updating the vindex needs to block lookups for the whole update of the data structure
+	if updateIndex {
+		// Build the verifiable index _afterwards_ for several reasons:
+		//  1) doing this incrementally leads to a lot of duplicate work for keys with multiple values
+		//  2) updating the vindex needs to block lookups for the whole update of the data structure
 
-	// Locking strategy for the verifiable index is to prevent all reads while this is being updated.
-	// TODO(mhutchinson): inside the same mutex we will need to update the output log with the calculated
-	// map root, and eventually witness checkpoints.
-	// If this is too slow (almost certain), then we need some strategy to allow us to serve a version of
-	// the vindex while also updating it. One approach could be to have 2 trees whenever we are performing
-	// an update.
-	b.indexMu.Lock()
-	defer b.indexMu.Unlock()
-	for h := range updatedKeys {
-		idxes := b.data[h]
+		// Locking strategy for the verifiable index is to prevent all reads while this is being updated.
+		// TODO(mhutchinson): inside the same mutex we will need to update the output log with the calculated
+		// map root, and eventually witness checkpoints.
+		// If this is too slow (almost certain), then we need some strategy to allow us to serve a version of
+		// the vindex while also updating it. One approach could be to have 2 trees whenever we are performing
+		// an update.
+		klog.V(1).Infof("buildMap [%d, %d): updating %d keys in vindex", b.servingSize, size, len(updatedKeys))
+		b.indexMu.Lock()
+		defer b.indexMu.Unlock()
+		for h := range updatedKeys {
+			idxes := b.data[h]
 
-		// Here we hash by simply appending all indices in the list and hashing that
-		// TODO(mhutchinson): maybe use a log construction?
-		sum := sha256.New()
-		for _, idx := range idxes {
-			if err := binary.Write(sum, binary.BigEndian, idx); err != nil {
-				klog.Warning(err)
-				return err
+			// Here we hash by simply appending all indices in the list and hashing that
+			// TODO(mhutchinson): maybe use a log construction?
+			sum := sha256.New()
+			for _, idx := range idxes {
+				if err := binary.Write(sum, binary.BigEndian, idx); err != nil {
+					klog.Warning(err)
+					return err
+				}
 			}
-		}
 
-		// Finally, we update the vindex
-		if err := b.vindex.Insert(ctx, h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
-			return fmt.Errorf("Insert(): %s", err)
+			// Finally, we update the vindex
+			if err := b.vindex.Insert(ctx, h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
+				return fmt.Errorf("Insert(): %s", err)
+			}
 		}
 	}
 	durationVIndex := time.Since(startVIndex)
@@ -579,4 +617,43 @@ func checkpointUnsafe(rawCp []byte) (string, uint64, []byte, error) {
 		return "", 0, nil, fmt.Errorf("failed to decode hash: %v", err)
 	}
 	return origin, size, hash, nil
+}
+
+type reporter struct {
+	// treeSize is fixed for the lifetime of the reporter.
+	treeSize uint64
+
+	// Fields read/written only in report()
+	lastReport   time.Time
+	lastReported uint64
+
+	// Fields shared across multiple threads, protected by workedMutex
+	lastWorked  uint64
+	workedMutex sync.Mutex
+}
+
+func (r *reporter) report() {
+	lastWorked := func() uint64 {
+		r.workedMutex.Lock()
+		defer r.workedMutex.Unlock()
+		lw := r.lastWorked
+		return lw
+	}()
+
+	elapsed := time.Since(r.lastReport)
+	remaining := r.treeSize - r.lastReported - 1
+	rate := float64(lastWorked-r.lastReported) / elapsed.Seconds()
+	eta := time.Duration(float64(remaining)/rate) * time.Second
+	klog.Infof("%.1f leaves/s, last leaf=%d (remaining: %d, ETA: %s)", rate, r.lastReported, remaining, eta)
+
+	r.lastReport = time.Now()
+	r.lastReported = r.lastWorked
+}
+
+func (r *reporter) trackWork(index uint64) func() {
+	return func() {
+		r.workedMutex.Lock()
+		defer r.workedMutex.Unlock()
+		r.lastWorked = index
+	}
 }
