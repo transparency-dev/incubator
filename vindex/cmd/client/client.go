@@ -73,6 +73,15 @@ func run(ctx context.Context) error {
 		return nil
 	}
 
+	if *inLogBaseURL == "" {
+		// Support not providing input log in case a tlog-tiles isn't available (e.g. SumDB).
+		klog.Info("in_log_base_url not provided, so cannot dereference pointers")
+		for _, idx := range idxes {
+			fmt.Printf("%d\n", idx)
+		}
+		return nil
+	}
+
 	lr := newInputLogClientFromFlags()
 
 	klog.V(1).Infof("Dereferencing %d pointers", len(idxes))
