@@ -101,7 +101,7 @@ func run(ctx context.Context) error {
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
 	defer outputCloser()
 
-	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFnFromFlags(), outputLog, mapRoot)
+	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFnFromFlags(), outputLog, mapRoot, vindex.Options{})
 	if err != nil {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
