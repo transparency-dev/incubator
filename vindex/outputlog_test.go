@@ -14,7 +14,7 @@
 
 // vindex contains a prototype of an in-memory verifiable index.
 // This version uses the clone tool DB as the log source.
-package vindex
+package vindex_test
 
 import (
 	"bytes"
@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	fnote "github.com/transparency-dev/formats/note"
+	"github.com/transparency-dev/incubator/vindex"
 	"github.com/transparency-dev/merkle/proof"
 	"github.com/transparency-dev/merkle/rfc6962"
 )
@@ -72,7 +73,7 @@ func TestOutputLog_Lookup(t *testing.T) {
 				_ = os.RemoveAll(dir)
 			}()
 
-			log, closer, err := NewOutputLog(t.Context(), dir, s, v)
+			log, closer, err := vindex.NewOutputLog(t.Context(), dir, s, v)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -113,9 +114,9 @@ func TestOutpuLogLeafRoundtrip(t *testing.T) {
 	inH := sha256.Sum256([]byte("test123"))
 	inCp := []byte("example.com/test\n123\ndeadbeef")
 
-	leaf := MarshalLeaf(inH, inCp)
+	leaf := vindex.MarshalLeaf(inH, inCp)
 
-	outH, outCp, err := UnmarshalLeaf(leaf)
+	outH, outCp, err := vindex.UnmarshalLeaf(leaf)
 	if err != nil {
 		t.Fatal(err)
 	}

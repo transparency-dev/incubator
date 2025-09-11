@@ -39,6 +39,64 @@ import (
 	"k8s.io/klog/v2"
 )
 
+func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, outV note.Verifier) ([]uint64, []byte, error) {
+	// Currently the response contains the RFC6962 style response type; leaf, proof, etc.
+	// What if we flip this all around, and the OutputLog part of the response
+	// only returns an index into the output log, and the client has to look up
+	// that leaf, checkpoint, and generate inclusion proof?
+
+	cp, _, _, err := log.ParseCheckpoint(resp.OutputLogCP, outV.Name(), outV)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse output log checkpoint: %v", err)
+	}
+	outLeafHash := rfc6962.DefaultHasher.HashLeaf(resp.OutputLogLeaf)
+	olp := make([][]byte, len(resp.OutputLogProof))
+	for i := range olp {
+		olp[i] = resp.OutputLogProof[i][:]
+	}
+	oli := cp.Size - 1 // TODO(mhutchinson): include this in the response?
+	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, oli, cp.Size, outLeafHash[:], olp, cp.Hash); err != nil {
+		return nil, nil, fmt.Errorf("failed to verify inclusion in output log: %v", err)
+	}
+
+	mapRoot, inCp, err := vindex.UnmarshalLeaf(resp.OutputLogLeaf)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal output log leaf: %v", err)
+	}
+
+	idxLeafHash := sha256.New()
+	for _, idx := range resp.IndexValue {
+		if err := binary.Write(idxLeafHash, binary.BigEndian, idx); err != nil {
+			return nil, nil, fmt.Errorf("failed to calculate leaf hash for indices: %v", err)
+		}
+	}
+	vindexLeafHash := idxLeafHash.Sum(nil)
+
+	pns := make([]prefix.ProofNode, len(resp.IndexProof))
+	for i, p := range resp.IndexProof {
+		label, err := prefix.NewLabel(p.LabelBitLen, p.LabelPath)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to create label: %v", err)
+		}
+		pns[i] = prefix.ProofNode{
+			Label: label,
+			Hash:  p.Hash,
+		}
+	}
+
+	if len(resp.IndexValue) > 0 {
+		if err := prefix.VerifyMembershipProof(sha256.Sum256, keyHash, [32]byte(vindexLeafHash), pns, mapRoot); err != nil {
+			return nil, nil, fmt.Errorf("failed to verify membership: %v", err)
+		}
+	} else {
+		if err := prefix.VerifyNonMembershipProof(sha256.Sum256, keyHash, pns, mapRoot); err != nil {
+			return nil, nil, fmt.Errorf("failed to verify non-membership: %v", err)
+		}
+	}
+
+	return resp.IndexValue, inCp, nil
+}
+
 // NewVIndexClient returns a client that can perform verified lookups into the index at the
 // given base URL, using the supplied verifier to check checkpoint signatures on the output
 // log.
@@ -79,61 +137,7 @@ func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, []byte,
 		return nil, nil, fmt.Errorf("lookup failed: %v", err)
 	}
 
-	// Currently the response contains the RFC6962 style response type; leaf, proof, etc.
-	// What if we flip this all around, and the OutputLog part of the response
-	// only returns an index into the output log, and the client has to look up
-	// that leaf, checkpoint, and generate inclusion proof?
-
-	cp, _, _, err := log.ParseCheckpoint(resp.OutputLogCP, c.outV.Name(), c.outV)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse output log checkpoint: %v", err)
-	}
-	outLeafHash := rfc6962.DefaultHasher.HashLeaf(resp.OutputLogLeaf)
-	olp := make([][]byte, len(resp.OutputLogProof))
-	for i := range olp {
-		olp[i] = resp.OutputLogProof[i][:]
-	}
-	oli := cp.Size - 1 // TODO(mhutchinson): include this in the response?
-	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, oli, cp.Size, outLeafHash[:], olp, cp.Hash); err != nil {
-		return nil, nil, fmt.Errorf("failed to verify inclusion in output log: %v", err)
-	}
-
-	mapRoot, inCp, err := vindex.UnmarshalLeaf(resp.OutputLogLeaf)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to unmarshal output log leaf: %v", err)
-	}
-
-	idxLeafHash := sha256.New()
-	for _, idx := range resp.IndexValue {
-		if err := binary.Write(idxLeafHash, binary.BigEndian, idx); err != nil {
-			return nil, nil, fmt.Errorf("failed to calculate leaf hash for indices: %v", err)
-		}
-	}
-	vindexLeafHash := idxLeafHash.Sum(nil)
-
-	pns := make([]prefix.ProofNode, len(resp.IndexProof))
-	for i, p := range resp.IndexProof {
-		label, err := prefix.NewLabel(p.LabelBitLen, p.LabelPath)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create label: %v", err)
-		}
-		pns[i] = prefix.ProofNode{
-			Label: label,
-			Hash:  p.Hash,
-		}
-	}
-
-	if len(resp.IndexValue) > 0 {
-		if err := prefix.VerifyMembershipProof(sha256.Sum256, kh, [32]byte(vindexLeafHash), pns, mapRoot); err != nil {
-			return nil, nil, fmt.Errorf("failed to verify membership: %v", err)
-		}
-	} else {
-		if err := prefix.VerifyNonMembershipProof(sha256.Sum256, kh, pns, mapRoot); err != nil {
-			return nil, nil, fmt.Errorf("failed to verify non-membership: %v", err)
-		}
-	}
-
-	return resp.IndexValue, inCp, nil
+	return VerifyLookupResponse(kh, resp, c.outV)
 }
 
 func (c VIndexClient) lookupUnverified(ctx context.Context, kh [sha256.Size]byte) (api.LookupResponse, error) {

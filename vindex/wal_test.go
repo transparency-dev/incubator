@@ -19,6 +19,7 @@ package vindex
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -313,4 +314,9 @@ func TestUnmarshal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mustHashEncode(data string) string {
+	h := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(h[:])
 }
