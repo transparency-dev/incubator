@@ -143,7 +143,9 @@ func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource
 	go submitEntries(ctx, inputAppender)
 
 	return inputLog, func() {
-		_ = inputShutdown(ctx)
+		if err := inputShutdown(ctx); err != nil {
+			klog.Warningf("Error shutting down Input Log appender: %v", err)
+		}
 	}
 }
 
