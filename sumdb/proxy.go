@@ -32,8 +32,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var (
+	listen = flag.String("listen", ":8089", "Address to set up HTTP server listening on")
+)
+
 const (
-	listenAddr   = ":8080"
 	upstreamBase = "https://sum.golang.org"
 )
 
@@ -46,25 +49,33 @@ func main() {
 		klog.Fatalf("Failed to parse upstream URL %q: %v", upstreamBase, err)
 	}
 
+	const tlogEntriesPrefix = "/tile/entries/"
+	const tlogTilePrefix = "/tile/"
+
+	const sumDBTileDataPrefix = "/tile/8/data/"
+	const sumDBTilePrefix = "/tile/8/"
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(upstream)
 			klog.V(2).Infof("Request for %s", r.In.URL.Path)
 			if r.In.URL.Path == "/checkpoint" {
 				r.Out.URL.Path = "/latest"
-			} else if strings.HasPrefix(r.In.URL.Path, "/tile/entries/") {
-				o := strings.TrimPrefix(r.In.URL.Path, "/tile/entries/")
-				r.Out.URL.Path = fmt.Sprintf("/tile/8/data/%s", o)
-			} else if strings.HasPrefix(r.In.URL.Path, "/tile/") {
-				o := strings.TrimPrefix(r.In.URL.Path, "/tile/")
-				r.Out.URL.Path = fmt.Sprintf("/tile/8/%s", o)
+			} else if strings.HasPrefix(r.In.URL.Path, tlogEntriesPrefix) {
+				o := strings.TrimPrefix(r.In.URL.Path, tlogEntriesPrefix)
+				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTileDataPrefix, o)
+			} else if strings.HasPrefix(r.In.URL.Path, tlogTilePrefix) {
+				o := strings.TrimPrefix(r.In.URL.Path, tlogTilePrefix)
+				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTilePrefix, o)
 			}
 		},
 		ModifyResponse: func(r *http.Response) error {
-			if strings.HasPrefix(r.Request.URL.Path, "/tile/8/data/") {
+			if strings.HasPrefix(r.Request.URL.Path, sumDBTileDataPrefix) {
 				// Leaf data requires splitting into individual records, and then
 				// reassembling with the record size prepended to each record.
-				data, _ := io.ReadAll(r.Body)
+				data, err := io.ReadAll(r.Body)
+				if err != nil {
+					return err
+				}
 				leaves := bytes.Split(data, []byte{'\n', '\n'})
 				buf := bytes.Buffer{}
 				for _, l := range leaves {
@@ -80,8 +91,8 @@ func main() {
 		},
 	}
 
-	klog.Infof("Proxying tlog-tiles API to %s on %s", upstreamBase, listenAddr)
-	if err := http.ListenAndServe(listenAddr, proxy); err != nil {
+	klog.Infof("Proxying tlog-tiles API to %s on %s", upstreamBase, *listen)
+	if err := http.ListenAndServe(*listen, proxy); err != nil {
 		klog.Fatalf("ListenAndServe: %v", err)
 	}
 }
