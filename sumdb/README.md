@@ -6,7 +6,7 @@ This allows tooling written for the tlog-tiles API to be used with the SumDB, ev
 ### Running
 
 ```shell
-go run ./sumdb/proxy.go --listen=":8089"
+go run ./sumdb/cmd/proxy.go --listen=":8089"
 ```
 
 ### Using
