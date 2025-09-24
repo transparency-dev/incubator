@@ -2,7 +2,7 @@
 
 This is a demo of building a [Verifiable Index](../../README.md) for Go's SumDB.
 
-The index allows package maintainers to verifiable look up all [non-psuedo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) versions of their module served by the Module Proxy.
+The index allows package maintainers to verifiably look up all [non-pseudo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) versions of their module served by the Module Proxy.
 
 [tlog-tiles]: https://c2sp.org/tlog-tiles
 [Tessera]: https://github.com/transparency-dev/tessera

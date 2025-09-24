@@ -50,8 +50,8 @@ import (
 )
 
 var (
-	inputLogPrivKeyFile  = flag.String("input_log_private_key", "", "Location of private key file. If unset, uses the contents of the INPUT_LOG_PRIVATE_KEY environment variable.")
-	outputLogPrivKeyFile = flag.String("output_log_private_key", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
+	inputLogPrivKeyFile  = flag.String("input_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the INPUT_LOG_PRIVATE_KEY environment variable.")
+	outputLogPrivKeyFile = flag.String("output_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
 	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Input Log, Output Log, and allocate space to store the verifiable map persistence.")
 	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
@@ -291,7 +291,7 @@ func getInputLogSignerVerifierOrDie() (note.Signer, note.Verifier) {
 	} else {
 		privKey = os.Getenv("INPUT_LOG_PRIVATE_KEY")
 		if len(privKey) == 0 {
-			klog.Exit("Supply private key file path using --input_log_private_key or set INPUT_LOG_PRIVATE_KEY environment variable")
+			klog.Exit("Supply private key file path using --input_log_private_key_path or set INPUT_LOG_PRIVATE_KEY environment variable")
 		}
 	}
 	s, v, err := fnote.NewEd25519SignerVerifier(privKey)
@@ -314,7 +314,7 @@ func getOutputLogSignerVerifierOrDie() (note.Signer, note.Verifier) {
 	} else {
 		privKey = os.Getenv("OUTPUT_LOG_PRIVATE_KEY")
 		if len(privKey) == 0 {
-			klog.Exit("Supply private key file path using --output_log_private_key or set OUTPUT_LOG_PRIVATE_KEY environment variable")
+			klog.Exit("Supply private key file path using --output_log_private_key_path or set OUTPUT_LOG_PRIVATE_KEY environment variable")
 		}
 	}
 	s, v, err := fnote.NewEd25519SignerVerifier(privKey)

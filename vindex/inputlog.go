@@ -32,11 +32,15 @@ type InputLogOpts struct {
 }
 
 func NewTiledInputLog(base *url.URL, v note.Verifier, o InputLogOpts) (InputLog, error) {
-	c := o.HttpClient
-	if c == nil {
-		c = http.DefaultClient
+	// Set any missing optional values to their defaults
+	if o.HttpClient == nil {
+		o.HttpClient = http.DefaultClient
 	}
-	f, err := client.NewHTTPFetcher(base, c)
+	if len(o.Origin) == 0 {
+		o.Origin = v.Name()
+	}
+
+	f, err := client.NewHTTPFetcher(base, o.HttpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +63,7 @@ func (s logReaderSource) Checkpoint(ctx context.Context) (checkpoint []byte, err
 }
 
 func (s logReaderSource) Parse(cpRaw []byte) (*log.Checkpoint, error) {
-	origin := s.opts.Origin
-	if len(origin) == 0 {
-		origin = s.v.Name()
-	}
-	cp, _, _, err := log.ParseCheckpoint(cpRaw, origin, s.v)
+	cp, _, _, err := log.ParseCheckpoint(cpRaw, s.opts.Origin, s.v)
 	return cp, err
 }
 
