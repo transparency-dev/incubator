@@ -179,7 +179,7 @@ func (c VIndexClient) lookupUnverified(ctx context.Context, kh [sha256.Size]byte
 // NewInputLogClient returns a client that allows pointers returned from the Verifiable Index
 // to be dereferenced by looking up entries in the Input Log. All operations are verified by this
 // client, which closes the loop.
-func NewInputLogClient(inLogUrl string, inV note.Verifier, hc *http.Client) (*InputLogClient, error) {
+func NewInputLogClient(inLogUrl string, origin string, inV note.Verifier, hc *http.Client) (*InputLogClient, error) {
 	u, err := url.Parse(inLogUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %v", err)
@@ -189,23 +189,25 @@ func NewInputLogClient(inLogUrl string, inV note.Verifier, hc *http.Client) (*In
 		return nil, fmt.Errorf("failed to create HTTP fetcher for %q: %v", u, err)
 	}
 	return &InputLogClient{
-		v:  inV,
-		lc: c,
+		v:      inV,
+		origin: origin,
+		lc:     c,
 	}, nil
 }
 
 // InputLogClient is a client intended to be used by users of the VIndexClient that want
 // to look up the original leaves from the Input Log.
 type InputLogClient struct {
-	v  note.Verifier
-	lc logClient
+	v      note.Verifier
+	origin string
+	lc     logClient
 }
 
 // Dereference takes pointers returned by the VIndexClient Lookup method, and fetches
 // the original leaves from the Input Log. The inclusion of any leaves returned will be
 // verified by constructing inclusion proofs to the checkpoint provided.
 func (c *InputLogClient) Dereference(ctx context.Context, cpRaw []byte, pointers []uint64) iter.Seq2[InputLogLeaf, error] {
-	cp, _, _, err := log.ParseCheckpoint(cpRaw, c.v.Name(), c.v)
+	cp, _, _, err := log.ParseCheckpoint(cpRaw, c.origin, c.v)
 	if err != nil {
 		return func(yield func(InputLogLeaf, error) bool) {
 			yield(InputLogLeaf{}, fmt.Errorf("failed to parse input log checkpoint: %v", err))

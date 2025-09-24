@@ -36,6 +36,7 @@ var (
 	lookup        = flag.String("lookup", "", "The key to look up in the vindex.")
 	outLogPubKey  = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
 	inLogPubKey   = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint.")
+	inLogOrigin   = flag.String("in_log_origin", "", "Optional: allows the Input Log Origin string to be configured to something other than the public key name.")
 	minIdx        = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
 )
 
@@ -125,7 +126,11 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 	if err != nil {
 		klog.Exitf("failed to construct output log verifier: %v", err)
 	}
-	c, err := client.NewInputLogClient(*inLogBaseURL, v, http.DefaultClient)
+	origin := *inLogOrigin
+	if len(origin) == 0 {
+		origin = v.Name()
+	}
+	c, err := client.NewInputLogClient(*inLogBaseURL, origin, v, http.DefaultClient)
 	if err != nil {
 		klog.Exitf("failed to construct VIndex Client: %v", err)
 	}

@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// sumdb is a command that launches a local proxy that allows clients to query
-// using the tlog-tiles API, and retrieve results from SumDB.
-package main
+// sumdb provides a utility proxy to convert to a tlog-tiles API.
+package sumdb
 
 import (
 	"bytes"
 	"encoding/binary"
-	"flag"
 	"fmt"
 
 	"net/http"
@@ -32,22 +30,23 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var (
-	listen = flag.String("listen", ":8089", "Address to set up HTTP server listening on")
-)
-
 const (
 	upstreamBase = "https://sum.golang.org"
 )
 
-func main() {
-	klog.InitFlags(nil)
-	flag.Parse()
+type ProxyOpts struct {
+	// PathPrefix should be set if the proxy is hosted not at "/".
+	// Any path beyond this should be set here, so that it can be stripped.
+	PathPrefix string
+}
 
+func NewProxy(opts ProxyOpts) *httputil.ReverseProxy {
 	upstream, err := url.Parse(upstreamBase)
 	if err != nil {
 		klog.Fatalf("Failed to parse upstream URL %q: %v", upstreamBase, err)
 	}
+
+	prefix, _ := strings.CutSuffix(opts.PathPrefix, "/")
 
 	const tlogEntriesPrefix = "/tile/entries/"
 	const tlogTilePrefix = "/tile/"
@@ -57,14 +56,16 @@ func main() {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(upstream)
+			inPath := strings.TrimPrefix(r.In.URL.Path, prefix)
+
 			klog.V(2).Infof("Request for %s", r.In.URL.Path)
-			if r.In.URL.Path == "/checkpoint" {
+			if inPath == "/checkpoint" {
 				r.Out.URL.Path = "/latest"
-			} else if strings.HasPrefix(r.In.URL.Path, tlogEntriesPrefix) {
-				o := strings.TrimPrefix(r.In.URL.Path, tlogEntriesPrefix)
+			} else if strings.HasPrefix(inPath, tlogEntriesPrefix) {
+				o := strings.TrimPrefix(inPath, tlogEntriesPrefix)
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTileDataPrefix, o)
-			} else if strings.HasPrefix(r.In.URL.Path, tlogTilePrefix) {
-				o := strings.TrimPrefix(r.In.URL.Path, tlogTilePrefix)
+			} else if strings.HasPrefix(inPath, tlogTilePrefix) {
+				o := strings.TrimPrefix(inPath, tlogTilePrefix)
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTilePrefix, o)
 			}
 		},
@@ -91,9 +92,5 @@ func main() {
 		},
 	}
 
-	klog.Infof("Proxying tlog-tiles API to %s on %s", upstreamBase, *listen)
-	if err := http.ListenAndServe(*listen, proxy); err != nil {
-		klog.Fatalf("ListenAndServe: %v", err)
-	}
+	return proxy
 }
-
