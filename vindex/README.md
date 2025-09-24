@@ -179,7 +179,7 @@ Values are an ordered list of indices.
 ## Status
 
 Known applications:
-  - there is a basic end-to-end application written that supports SumDB in [trillian-examples](https://github.com/google/trillian-examples/tree/master/experimental/vindex/cmd)
+  - [./cmd/sumdb/](./cmd/sumdb/) contains a binary that builds a verifiable index from the contents of the [Go SumDB](https://sum.golang.org/).
   - [./cmd/logandmap/](./cmd/logandmap/) contains a demo of running a [tlog-tiles][] log using [Tessera][], and keeping the contents of that log synced to a VIndex
 
 ## Milestones
