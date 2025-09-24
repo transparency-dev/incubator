@@ -96,8 +96,8 @@ github.com/transparency-dev/formats v0.0.0-20250723101439-be3b1008ec3a h1:l1RrmD
 github.com/transparency-dev/formats v0.0.0-20250723101439-be3b1008ec3a/go.mod h1:A4VaaPFBMEuwtuihpGY8wUOqRBy5plQww4NqfjK5E7c=
 github.com/transparency-dev/merkle v0.0.2 h1:Q9nBoQcZcgPamMkGn7ghV8XiTZ/kRxn1yCG81+twTK4=
 github.com/transparency-dev/merkle v0.0.2/go.mod h1:pqSy+OXefQ1EDUVmAJ8MUhHB9TXGuzVAT58PqBoHz1A=
-github.com/transparency-dev/tessera v1.0.0-rc2 h1:BKtDWr0nhL9dG66cS4DyKU9lpZFbUZrpHGh+BpqakcU=
-github.com/transparency-dev/tessera v1.0.0-rc2/go.mod h1:aaLlvG/sEPMzT96iIF4hua6Z9pLzkfDtkbaUAR4IL8I=
+github.com/transparency-dev/tessera v1.0.0-rc3 h1:v385KqMekDUKI3ZVJHCHE5MAz8LBrWsEKa6OzYLrz0k=
+github.com/transparency-dev/tessera v1.0.0-rc3/go.mod h1:aaLlvG/sEPMzT96iIF4hua6Z9pLzkfDtkbaUAR4IL8I=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
