@@ -1,7 +1,5 @@
 ## Verifiable Index: Go Checksum Database (SumDB)
 
-[tlog-tiles]: https://c2sp.org/tlog-tiles
-
 This is a demo of building a [Verifiable Index](../../README.md) for [Go's Checksum Database](https://go.dev/ref/mod#checksum-database).
 The index allows module maintainers to verifiably look up all [non-pseudo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) versions of their module served by the Module Proxy.
 
@@ -9,9 +7,7 @@ The index allows module maintainers to verifiably look up all [non-pseudo](https
 
 The sum.golang.org service, often referred to as Go Checksum DB or SumDB, serves as an auditable checksum database for Go modules. Its primary purpose is to enhance the security and integrity of the Go module ecosystem by providing a public, tamper-proof record of module checksums. This ensures that when developers fetch a module, they receive the exact version of the code that others are using and that hasn't been maliciously altered.
 
-SumDB functions as a transparency log. This means that every module version and its corresponding checksum added to the database is appended in an immutable, append-only fashion. Each new entry is cryptographically committed to, which makes it impossible to modify or remove an entry without detection. This transparency allows anyone to independently verify the integrity of the database and confirm that no module has been altered or replaced. The auditable nature of the database is crucial for trust in the Go module supply chain.
-
-In addition to sum.golang.org, there is also an index at index.golang.org. This index provides a convenient way to discover available Go modules and their versions. However, it's important to note that index.golang.org is not verifiable in the same way as sum.golang.org. While it helps with discovery, it does not offer the same cryptographic guarantees of integrity and immutability as the checksum database. The security and verification of module content rely solely on the auditable records within sum.golang.org.
+SumDB functions as a transparency log. This means that every module version and its corresponding checksums are added to the database is an immutable, append-only fashion. Each new entry is cryptographically committed to, making it impossible to modify or remove an entry without detection. This transparency allows anyone to independently verify the integrity of the database and confirm that no module has been altered or replaced. The auditable nature of the database is crucial for trust in the Go module supply chain.
 
 The entries in the SumDB log match what is written in a `go.sum` file.
 For example, any project depending on the v1.0 release of Tessera will have the following in its `go.sum` file:
@@ -23,7 +19,13 @@ github.com/transparency-dev/tessera v1.0.0/go.mod h1:TLvfjlkbmsmKVEJUtzO2eb9Q2IB
 
 This is the same content written to the SumDB at index 43930254 ([query link](https://sum.golang.org/lookup/github.com/transparency-dev/tessera@v1.0.0)).
 
-The index is built from this log of modules by parsing the module name from every leaf. A pointer to the leaf is added to the index if it represents a [non-pseudo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) version.
+In addition to sum.golang.org, modules can have all their versions enumerated via proxy.golang.org.
+For example, all versions of `github.com/transparency-dev/tessera` can be looked up using https://proxy.golang.org/github.com/transparency-dev/tessera/@v/list.
+This index provides a convenient way to enumerate versions of Go modules. However, it's important to note that these lookups in proxy.golang.org are not verifiable in the same way as sum.golang.org. While it helps with discovery, it does not offer the same cryptographic guarantees of integrity and immutability as the checksum database. The security and verification of module content rely solely on the auditable records within sum.golang.org.
+
+This Verifiable Index addresses this lookup use-case, while preserving verifiability.
+The index is built from this log of modules by parsing the module name from every leaf.
+A pointer to the leaf is added to the index if it represents a [non-pseudo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) version.
 The index can be [queried](#querying) using the client.
 
 ### Status
@@ -50,11 +52,11 @@ The command above starts a web server that hosts the following URLs:
 
 > [!NOTE]
 > This brings up a proxy server that makes SumDB available via the local server at `/inputlog/`.
-> This allows the index and the client to use standard [tlog-tiles][] APIs to query the data, instead of requiring a custom client for SumDB.
+> This allows the Verifiable Index and its clients to use standard [tlog-tiles][] APIs to query the data, instead of requiring a custom client for SumDB.
 
 ### Querying 
 
-This log is processed into a verifiable map which can be looked up using the client in `./vindex/cmd/client`.
+The SumDB log is processed into a verifiable map which can be looked up using the client in `./vindex/cmd/client`.
 Below is an example of querying the index to list all releases of `github.com/transparency-dev/tessera`.
 The output lists all of the indices where the module is logged, and the entry from the log at this index. 
 
@@ -161,4 +163,6 @@ go run github.com/mhutchinson/woodpecker@main \
 ```
 
 Use the left and right arrow keys to browse, `g` to jump to a specific index, and `q` to quit.
+
+[tlog-tiles]: https://c2sp.org/tlog-tiles
 
