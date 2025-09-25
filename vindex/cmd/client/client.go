@@ -124,7 +124,7 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 	}
 	v, err := note.NewVerifier(*inLogPubKey)
 	if err != nil {
-		klog.Exitf("failed to construct output log verifier: %v", err)
+		klog.Exitf("failed to construct input log verifier: %v", err)
 	}
 	origin := *inLogOrigin
 	if len(origin) == 0 {
@@ -132,7 +132,7 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 	}
 	c, err := client.NewInputLogClient(*inLogBaseURL, origin, v, http.DefaultClient)
 	if err != nil {
-		klog.Exitf("failed to construct VIndex Client: %v", err)
+		klog.Exitf("failed to construct Input Log client: %v", err)
 	}
 	return c
 }

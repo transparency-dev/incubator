@@ -56,6 +56,38 @@ The command above starts a web server that hosts the following URLs:
 
 ### Querying 
 
+=======
+
+#### Auditing Local Modules
+
+A tool is provided that ensures that every version in SumDB has a corresponding git tag in a local checkout of the module.
+The command below shows the output for this command querying a local checkout of `github.com/transparency-dev/tessera`:
+
+```shell
+go run ./vindex/cmd/sumdbverify \
+  --base_url http://localhost:8088/ \
+  --out_log_pub_key=SumDBIndex+a5ed0e81+AXEnbaKj+9gCH3f69vcQokgkcFocCl+GlaMXrAg8mRzd \
+  --mod_root ~/git/tessera
+
+v0.1.0 found at index 37258761: ✅ found in git tags
+v0.1.1 found at index 37258762: ✅ found in git tags
+v0.1.2 found at index 37258746: ✅ found in git tags
+v0.2.0 found at index 38108519: ✅ found in git tags
+v1.0.0-rc1 found at index 41510961: ✅ found in git tags
+v1.0.0-rc2 found at index 42710781: ✅ found in git tags
+v1.0.0-rc3 found at index 43267373: ✅ found in git tags
+v1.0.0 found at index 43930254: ✅ found in git tags
+```
+
+This tool only checks for differences in the known version strings between the Checksum DB and the git checkout.
+
+> [!IMPORTANT]
+> This tool does not yet check that the hashes in the SumDB correspond to the state of the git repository.
+> A useful extension would be to support checking out each git tag to confirm hashes.
+> A [similar monitor](https://github.com/usbarmory/armory-drive-log/tree/master/cmd/monitor) exists for the armory-drive log.
+
+#### General Query
+
 The SumDB log is processed into a verifiable map which can be looked up using the client in `./vindex/cmd/client`.
 Below is an example of querying the index to list all releases of `github.com/transparency-dev/tessera`.
 The output lists all of the indices where the module is logged, and the entry from the log at this index. 
@@ -67,8 +99,7 @@ go run ./vindex/cmd/client \
   --out_log_pub_key=SumDBIndex+a5ed0e81+AXEnbaKj+9gCH3f69vcQokgkcFocCl+GlaMXrAg8mRzd \
   --in_log_pub_key=sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8 \
   --in_log_origin="go.sum database tree" \
-  --lookup=github.com/transparency-dev/tessera \
-  --min_idx=40000000
+  --lookup=github.com/transparency-dev/tessera
 
 37258746)
 github.com/transparency-dev/tessera v0.1.2 h1:s8h0HQ5knhvCmQ2TdATw7FMTvdZY+RMcAcgsaPrKm1k=
@@ -115,7 +146,7 @@ Note that this matches the list of entries on the unverifiable proxy endpoint: h
 When running this command on a regular basis, you can avoid seeing entries you have already processed by providing the `--min_idx` flag.
 
 ```shell
-❯ go run ./vindex/cmd/client \
+go run ./vindex/cmd/client \
   --vindex_base_url http://localhost:8088/vindex/ \
   --in_log_base_url http://localhost:8088/inputlog/ \
   --out_log_pub_key=SumDBIndex+a5ed0e81+AXEnbaKj+9gCH3f69vcQokgkcFocCl+GlaMXrAg8mRzd \
