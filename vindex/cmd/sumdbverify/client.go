@@ -157,12 +157,7 @@ func queryTags(ctx context.Context, modRoot string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to run git tag: %w", err)
 	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
-		return []string{}, nil
-	}
-	tags := strings.Split(trimmed, "\n")
-	return tags, nil
+	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
 }
 
 func queryIndex(ctx context.Context, vic *client.VIndexClient, modName string) (map[string]modData, error) {
@@ -195,7 +190,7 @@ func queryIndex(ctx context.Context, vic *client.VIndexClient, modName string) (
 func parseLeaf(idx uint64, data []byte) (string, modData, error) {
 	lines := strings.Split(string(data), "\n")
 	if len(lines) < 2 {
-		panic(fmt.Errorf("expected 2 lines but got %d", len(lines)))
+		return "", modData{}, fmt.Errorf("expected 2 lines but got %d", len(lines))
 	}
 
 	line0Parts := line0RE.FindStringSubmatch(lines[0])
