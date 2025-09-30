@@ -132,7 +132,7 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	u, err := url.Parse(raw)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return u
 }
@@ -141,7 +141,7 @@ func mustReadAll(t *testing.T, r io.Reader) []byte {
 	t.Helper()
 	bs, err := io.ReadAll(r)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	return bs
 }
