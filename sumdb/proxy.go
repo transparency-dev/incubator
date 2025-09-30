@@ -57,8 +57,8 @@ func NewProxy(opts ProxyOpts) *httputil.ReverseProxy {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(upstream)
 			inPath := strings.TrimPrefix(r.In.URL.Path, prefix)
+			klog.V(2).Infof("Request for %s", inPath)
 
-			klog.V(2).Infof("Request for %s", r.In.URL.Path)
 			if inPath == "/checkpoint" {
 				r.Out.URL.Path = "/latest"
 			} else if strings.HasPrefix(inPath, tlogEntriesPrefix) {
