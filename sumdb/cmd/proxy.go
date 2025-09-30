@@ -26,19 +26,18 @@ import (
 )
 
 var (
-	listen = flag.String("listen", ":8089", "Address to set up HTTP server listening on")
-)
-
-const (
-	upstreamBase = "https://sum.golang.org"
+	listen      = flag.String("listen", ":8089", "Address to set up HTTP server listening on")
+	witnessSigs = flag.Uint("witnesses", 0, "Number of witness signatures required on a checkpoint. Setting this will pull checkpoints from the transparency-dev prod distributor.")
 )
 
 func main() {
 	klog.InitFlags(nil)
 	flag.Parse()
 
-	proxy := sumdb.NewProxy(sumdb.ProxyOpts{})
-	klog.Infof("Proxying tlog-tiles API to %s on %s", upstreamBase, *listen)
+	proxy := sumdb.NewProxy(sumdb.ProxyOpts{
+		WitnessSigs: *witnessSigs,
+	})
+	klog.Infof("tlog-tiles API listening on %s", *listen)
 	if err := http.ListenAndServe(*listen, proxy); err != nil {
 		klog.Fatalf("ListenAndServe: %v", err)
 	}

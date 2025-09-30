@@ -47,6 +47,7 @@ var (
 	outputLogPrivKeyFile = flag.String("output_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
 	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Output Log, and allocate space to store the verifiable map persistence.")
 	persistIndex         = flag.Bool("persist_index", false, "Set to true to use a disk-based implementation of the verifiable index. This can be slow, but useful in situations where memory is constrained.")
+	witnessSigs          = flag.Uint("witnesses", 0, "Number of witness signatures required on the SumDB checkpoint. Setting this will pull checkpoints from the transparency-dev prod distributor.")
 	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
@@ -106,7 +107,8 @@ func run(ctx context.Context) error {
 		return err
 	}
 	sumProxy := sumdb.NewProxy(sumdb.ProxyOpts{
-		PathPrefix: "/inputlog/",
+		PathPrefix:  "/inputlog/",
+		WitnessSigs: *witnessSigs,
 	})
 
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
