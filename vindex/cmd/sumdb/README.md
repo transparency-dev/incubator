@@ -58,31 +58,7 @@ The command above starts a web server that hosts the following URLs:
 
 #### Auditing Local Modules
 
-A tool is provided that ensures that every version in SumDB has a corresponding git tag in a local checkout of the module.
-The command below shows the output for this command querying a local checkout of `github.com/transparency-dev/tessera`:
-
-```shell
-go run ./vindex/cmd/sumdbverify \
-  --base_url http://localhost:8088/ \
-  --out_log_pub_key=SumDBIndex+a5ed0e81+AXEnbaKj+9gCH3f69vcQokgkcFocCl+GlaMXrAg8mRzd \
-  --mod_root ~/git/tessera
-
-v0.1.0 found at index 37258761: ✅ found in git tags
-v0.1.1 found at index 37258762: ✅ found in git tags
-v0.1.2 found at index 37258746: ✅ found in git tags
-v0.2.0 found at index 38108519: ✅ found in git tags
-v1.0.0-rc1 found at index 41510961: ✅ found in git tags
-v1.0.0-rc2 found at index 42710781: ✅ found in git tags
-v1.0.0-rc3 found at index 43267373: ✅ found in git tags
-v1.0.0 found at index 43930254: ✅ found in git tags
-```
-
-This tool only checks for differences in the known version strings between the Checksum DB and the git checkout.
-
-> [!IMPORTANT]
-> This tool does not yet check that the hashes in the SumDB correspond to the state of the git repository.
-> A useful extension would be to support checking out each git tag to confirm hashes.
-> A [similar monitor](https://github.com/usbarmory/armory-drive-log/tree/master/cmd/monitor) exists for the armory-drive log.
+The best tool to use is the SumDB-specific verification tool: [sumdbverify](../sumdbverify/).
 
 #### General Query
 
