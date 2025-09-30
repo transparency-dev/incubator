@@ -56,8 +56,6 @@ The command above starts a web server that hosts the following URLs:
 
 ### Querying 
 
-=======
-
 #### Auditing Local Modules
 
 A tool is provided that ensures that every version in SumDB has a corresponding git tag in a local checkout of the module.

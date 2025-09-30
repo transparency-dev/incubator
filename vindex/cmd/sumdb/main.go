@@ -46,6 +46,7 @@ import (
 var (
 	outputLogPrivKeyFile = flag.String("output_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
 	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Output Log, and allocate space to store the verifiable map persistence.")
+	persistIndex         = flag.Bool("persist_index", false, "Set to true to use a disk-based implementation of the verifiable index. This can be slow, but useful in situations where memory is constrained.")
 	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
@@ -111,7 +112,9 @@ func run(ctx context.Context) error {
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
 	defer outputCloser()
 
-	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, mapRoot, vindex.Options{})
+	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, mapRoot, vindex.Options{
+		PersistIndex: *persistIndex,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
