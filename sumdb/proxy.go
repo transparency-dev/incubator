@@ -31,19 +31,33 @@ import (
 )
 
 const (
-	upstreamBase = "https://sum.golang.org"
+	upstreamBase                 = "https://sum.golang.org"
+	distributorBase              = "https://api.transparency.dev/"
+	distributorCheckpointPathFmt = "/distributor/v0/logs/a32d071739c062f4973f1db8cc1069f517428d77105962b285bbf918c4062591/checkpoint.%d"
 )
 
 type ProxyOpts struct {
 	// PathPrefix should be set if the proxy is hosted not at "/".
 	// Any path beyond this should be set here, so that it can be stripped.
 	PathPrefix string
+
+	// WitnessSigs should be set to ensure that a given number of witness signatures
+	// are available. If this is left at the default of 0, then we proxy to the
+	// latest checkpoint from SumDB. If this is set to a positive number, then we
+	// request the latest checkpoint with that number of sigs from the checkpoint
+	// distributor.
+	// https://github.com/transparency-dev/distributor/
+	WitnessSigs uint
 }
 
 func NewProxy(opts ProxyOpts) *httputil.ReverseProxy {
 	upstream, err := url.Parse(upstreamBase)
 	if err != nil {
 		klog.Fatalf("Failed to parse upstream URL %q: %v", upstreamBase, err)
+	}
+	distributor, err := url.Parse(distributorBase)
+	if err != nil {
+		klog.Fatalf("Failed to parse distributor URL %q: %v", distributorBase, err)
 	}
 
 	prefix, _ := strings.CutSuffix(opts.PathPrefix, "/")
@@ -60,7 +74,12 @@ func NewProxy(opts ProxyOpts) *httputil.ReverseProxy {
 			klog.V(2).Infof("Request for %s", inPath)
 
 			if inPath == "/checkpoint" {
-				r.Out.URL.Path = "/latest"
+				if opts.WitnessSigs == 0 {
+					r.Out.URL.Path = "/latest"
+					return
+				}
+				r.SetURL(distributor)
+				r.Out.URL.Path = fmt.Sprintf(distributorCheckpointPathFmt, opts.WitnessSigs)
 			} else if strings.HasPrefix(inPath, tlogEntriesPrefix) {
 				o := strings.TrimPrefix(inPath, tlogEntriesPrefix)
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTileDataPrefix, o)
