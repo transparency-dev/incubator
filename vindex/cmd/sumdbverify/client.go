@@ -19,21 +19,26 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"text/tabwriter"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/transparency-dev/incubator/vindex/client"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/mod/sumdb/note"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
@@ -50,8 +55,8 @@ var (
 	// golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
 	// golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 	//
-	line0RE = regexp.MustCompile(`(.*) (.*) h1:(.*)`)
-	line1RE = regexp.MustCompile(`(.*) (.*)/go.mod h1:(.*)`)
+	line0RE = regexp.MustCompile(`(.*) (.*) (h1:.*)`)
+	line1RE = regexp.MustCompile(`(.*) (.*)/go.mod (h1:.*)`)
 )
 
 func main() {
@@ -72,47 +77,109 @@ func run(ctx context.Context) error {
 	if *modRoot == "" {
 		return errors.New("mod_root flag must be provided")
 	}
-	if s, err := os.Stat(*modRoot); err != nil || !s.IsDir() {
-		return errors.New("mod_root flag must be a directory")
+
+	// TODO(mhutchinson): Support a non-VIndex version of this that reads the non-verifiable proxy endpoints:
+	// 1) https://proxy.golang.org/github.com/transparency-dev/tessera/@v/list
+	// 2) https://sum.golang.org/lookup/github.com/transparency-dev/tessera@v1.0.0
+	// This will provide a way to use this tool before the VIndex is widely available
+	sumFetcher := func(ctx context.Context, modName string) (map[string]modData, error) {
+		vic := newVIndexClientFromFlags()
+
+		return queryIndex(ctx, vic, modName)
 	}
-	modPathBytes, err := os.ReadFile(filepath.Join(*modRoot, "go.mod"))
+
+	report, reportErr := getReport(ctx, *modRoot, sumFetcher)
+	if reportErr != nil && len(report.versions) == 0 {
+		return fmt.Errorf("failed to compile report: %v", reportErr)
+	}
+
+	fmt.Println(report.modName)
+	tw := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+	if _, err := fmt.Fprintln(tw, "VERSION\tINDEX\tFOUND\tgo.mod\t"); err != nil {
+		return fmt.Errorf("failed to output report: %v", err)
+	}
+	for _, v := range report.versions {
+		var sumIndex string
+		if v.sumFound {
+			sumIndex = strconv.FormatUint(v.sumIndex, 10)
+		} else {
+			sumIndex = "--"
+		}
+
+		gitHash := "✅"
+		if v.gitCommitHash == nil {
+			gitHash = "❌"
+		}
+
+		goMod := "✅"
+		if v.gitCommitHash == nil || len(v.gitModHash) == 0 {
+			goMod = "⚠️"
+		} else if v.gitModHash != v.sumModHash {
+			goMod = "❌"
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t\n", v.version, sumIndex, gitHash, goMod); err != nil {
+			return fmt.Errorf("failed to output report: %v", err)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("failed to flush report to stdout: %v", err)
+	}
+
+	return reportErr
+}
+
+func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Context, string) (map[string]modData, error)) (diffReport, error) {
+	if s, err := os.Stat(modRoot); err != nil || !s.IsDir() {
+		return diffReport{}, errors.New("mod_root flag must be a directory")
+	}
+	modPathBytes, err := os.ReadFile(filepath.Join(modRoot, "go.mod"))
 	if err != nil {
-		return fmt.Errorf("failed to read go.mod file: %v", err)
+		return diffReport{}, fmt.Errorf("failed to read go.mod file: %v", err)
 	}
 	modPath, err := modfile.Parse("go.mod", modPathBytes, nil)
 	if err != nil {
-		return fmt.Errorf("failed to parse go.mod file: %v", err)
+		return diffReport{}, fmt.Errorf("failed to parse go.mod file: %v", err)
 	}
 	modName := modPath.Module.Mod.Path
 
+	report := diffReport{
+		modName:  modName,
+		versions: make([]versionReport, 0),
+	}
+
+	repo, err := git.PlainOpen(modRoot)
+	if err != nil {
+		return report, fmt.Errorf("directory at mod_root %q cannot be opened as git repo: %v", modRoot, err)
+	}
 	eg, egctx := errgroup.WithContext(ctx)
 	var versions map[string]modData
 	var tags map[string]struct{}
 
 	eg.Go(func() error {
-		// This function gets all version info from the verifiable index.
-		vic := newVIndexClientFromFlags()
-
-		versions, err = queryIndex(egctx, vic, modName)
-		if err != nil {
-			return fmt.Errorf("error querying index: %v", err)
-		}
-		return nil
+		var err error
+		versions, err = sumFetcher(egctx, modName)
+		return err
 	})
 	eg.Go(func() error {
-		// This function gets all tags from the local git checkout.
-		rawTags, err := queryTags(egctx, *modRoot)
+		refIter, err := repo.References()
 		if err != nil {
-			return fmt.Errorf("error enumerating git tags: %v", err)
+			return fmt.Errorf("failed to list references: %v", err)
 		}
-		tags = make(map[string]struct{}, len(rawTags))
-		for _, t := range rawTags {
-			tags[t] = struct{}{}
+
+		tags = make(map[string]struct{})
+		if err := refIter.ForEach(func(ref *plumbing.Reference) error {
+			if ref.Name().IsTag() {
+				tagName := ref.Name().Short()
+				tags[tagName] = struct{}{}
+			}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("failed to list tags: %v", err)
 		}
 		return nil
 	})
 	if err := eg.Wait(); err != nil {
-		return err
+		return report, err
 	}
 
 	// Create a sorted slice of versions
@@ -122,42 +189,111 @@ func run(ctx context.Context) error {
 	}
 	semver.Sort(sv)
 
-	fmt.Println(modName)
+	vErrors := make([]error, 0)
 	for _, v := range sv {
-		d := versions[v]
-		presence := "✅ found in git tags"
-		if _, found := tags[v]; !found {
-			presence = "❌ missing from git tags"
+		sumHashes := versions[v]
+
+		vr, err := reportVersion(ctx, repo, v)
+		if err != nil {
+			vErrors = append(vErrors, fmt.Errorf("failed to get report for version %q: %v", v, err))
 		}
+		vr.sumFound = true
+		vr.sumModHash = sumHashes.modHash
+		vr.sumIndex = sumHashes.index
+		report.versions = append(report.versions, vr)
 
-		fmt.Printf("%s found at index %d: %s\n", v, d.index, presence)
-		delete(tags, v)
-	}
-
-	if len(tags) > 0 {
-		fmt.Println("----------")
-		fmt.Println("> INFO: The tagged versions below were never downloaded via the Module Proxy")
-		for t := range tags {
-			fmt.Printf("%s found locally but missing from SumDB\n", t)
+		if vr.gitCommitHash != nil {
+			delete(tags, v)
 		}
 	}
-	return nil
+
+	// TODO(mhutchinson): Include information on tags in git that aren't in SumDB
+	// if len(tags) > 0 {
+	// 	for t := range tags {
+	// 		report.versions = append(report.versions, versionReport{
+	// 			version:  t,
+	// 			sumFound: false,
+	//          // also include git info here
+	// 		})
+	// 	}
+	// }
+	return report, errors.Join(vErrors...)
+}
+
+func reportVersion(ctx context.Context, repo *git.Repository, v string) (versionReport, error) {
+	report := &versionReport{
+		version: v,
+	}
+
+	// Find the commit this tag points to.
+	ref := plumbing.NewTagReferenceName(v)
+	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return *report, fmt.Errorf("failed to resolve tag '%s' to a commit: %v", ref, err)
+	}
+
+	// Update report to include the sha1 commit hash the tag points to.
+	report.gitCommitHash = hash[:]
+
+	// Find the go.mod file in this commit.
+	commit, err := repo.CommitObject(*hash)
+	if err != nil {
+		return *report, fmt.Errorf("failed to get commit object: %v", err)
+	}
+	tree, err := commit.Tree()
+	if err != nil {
+		return *report, fmt.Errorf("failed to get commit tree: %v", err)
+	}
+	hs, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+		modFile, err := tree.File("go.mod")
+		if err != nil {
+			return nil, err
+		}
+
+		blob, err := repo.BlobObject(modFile.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get blob object: %v", err)
+		}
+		return blob.Reader()
+	})
+	if err != nil {
+		if errors.Is(err, object.ErrFileNotFound) {
+			// This isn't necessarily an error: old versions didn't have go.mod files
+			return *report, nil
+		}
+		return *report, fmt.Errorf("failed to calculate file hash: %v", err)
+	}
+
+	// Update report to note that we found a go.mod file.
+	report.gitModHash = hs
+
+	return *report, nil
+}
+
+type diffReport struct {
+	modName  string
+	versions []versionReport
+}
+
+type versionReport struct {
+	version string
+
+	// These fields are written in-order, as further info becomes available.
+	// If no commit hash is present, then the version tag was not found in git.
+	gitCommitHash []byte
+	gitModHash    string
+
+	// If sumFound is not set, then no entry was found in SumDB so fields below
+	// should not be referenced.
+	sumFound   bool
+	sumIndex   uint64
+	sumModHash string
 }
 
 type modData struct {
 	index   uint64
-	zipHash []byte
-	modHash []byte
-}
-
-func queryTags(ctx context.Context, modRoot string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "tag")
-	cmd.Dir = modRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to run git tag: %w", err)
-	}
-	return strings.Split(strings.TrimSpace(string(out)), "\n"), nil
+	zipHash string
+	modHash string
 }
 
 func queryIndex(ctx context.Context, vic *client.VIndexClient, modName string) (map[string]modData, error) {
@@ -206,18 +342,10 @@ func parseLeaf(idx uint64, data []byte) (string, modData, error) {
 		return "", modData{}, fmt.Errorf("mismatched version names: (%s, %s)", line0Version, line1Version)
 	}
 
-	zipHash, err := base64.StdEncoding.DecodeString(zipHashB64)
-	if err != nil {
-		return "", modData{}, fmt.Errorf("failed to decode hash %q: %v", zipHashB64, err)
-	}
-	modHash, err := base64.StdEncoding.DecodeString(modHashB64)
-	if err != nil {
-		return "", modData{}, fmt.Errorf("failed to decode hash %q: %v", modHashB64, err)
-	}
 	return line0Version, modData{
 		index:   idx,
-		zipHash: zipHash,
-		modHash: modHash,
+		zipHash: zipHashB64,
+		modHash: modHashB64,
 	}, nil
 }
 
