@@ -18,10 +18,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,6 +38,7 @@ import (
 	"github.com/transparency-dev/incubator/vindex/client"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
+	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/mod/sumdb/note"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
@@ -57,8 +55,8 @@ var (
 	// golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
 	// golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 	//
-	line0RE = regexp.MustCompile(`(.*) (.*) h1:(.*)`)
-	line1RE = regexp.MustCompile(`(.*) (.*)/go.mod h1:(.*)`)
+	line0RE = regexp.MustCompile(`(.*) (.*) (h1:.*)`)
+	line1RE = regexp.MustCompile(`(.*) (.*)/go.mod (h1:.*)`)
 )
 
 func main() {
@@ -84,17 +82,10 @@ func run(ctx context.Context) error {
 	// 1) https://proxy.golang.org/github.com/transparency-dev/tessera/@v/list
 	// 2) https://sum.golang.org/lookup/github.com/transparency-dev/tessera@v1.0.0
 	// This will provide a way to use this tool before the VIndex is widely available
-	sumFetcher := func(ctx context.Context, modName string, versions map[string]modData) error {
+	sumFetcher := func(ctx context.Context, modName string) (map[string]modData, error) {
 		vic := newVIndexClientFromFlags()
 
-		vs, err := queryIndex(ctx, vic, modName)
-		if err != nil {
-			return fmt.Errorf("error querying index: %v", err)
-		}
-		for k, v := range vs {
-			versions[k] = v
-		}
-		return nil
+		return queryIndex(ctx, vic, modName)
 	}
 
 	report, reportErr := getReport(ctx, *modRoot, sumFetcher)
@@ -121,9 +112,9 @@ func run(ctx context.Context) error {
 		}
 
 		goMod := "✅"
-		if v.gitCommitHash == nil || !v.gitGoMod {
+		if v.gitCommitHash == nil || len(v.gitModHash) == 0 {
 			goMod = "⚠️"
-		} else if !bytes.Equal(v.gitModHash, v.sumModHash) {
+		} else if v.gitModHash != v.sumModHash {
 			goMod = "❌"
 		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t\n", v.version, sumIndex, gitHash, goMod); err != nil {
@@ -137,7 +128,7 @@ func run(ctx context.Context) error {
 	return reportErr
 }
 
-func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Context, string, map[string]modData) error) (diffReport, error) {
+func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Context, string) (map[string]modData, error)) (diffReport, error) {
 	if s, err := os.Stat(modRoot); err != nil || !s.IsDir() {
 		return diffReport{}, errors.New("mod_root flag must be a directory")
 	}
@@ -151,21 +142,23 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	}
 	modName := modPath.Module.Mod.Path
 
-	report := &diffReport{
+	report := diffReport{
 		modName:  modName,
 		versions: make([]versionReport, 0),
 	}
 
 	repo, err := git.PlainOpen(modRoot)
 	if err != nil {
-		return *report, fmt.Errorf("directory at mod_root %q cannot be opened as git repo: %v", modRoot, err)
+		return report, fmt.Errorf("directory at mod_root %q cannot be opened as git repo: %v", modRoot, err)
 	}
 	eg, egctx := errgroup.WithContext(ctx)
-	versions := make(map[string]modData)
+	var versions map[string]modData
 	var tags map[string]struct{}
 
 	eg.Go(func() error {
-		return sumFetcher(egctx, modName, versions)
+		var err error
+		versions, err = sumFetcher(egctx, modName)
+		return err
 	})
 	eg.Go(func() error {
 		refIter, err := repo.References()
@@ -186,7 +179,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 		return nil
 	})
 	if err := eg.Wait(); err != nil {
-		return *report, err
+		return report, err
 	}
 
 	// Create a sorted slice of versions
@@ -224,7 +217,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	// 		})
 	// 	}
 	// }
-	return *report, errors.Join(vErrors...)
+	return report, errors.Join(vErrors...)
 }
 
 func reportVersion(ctx context.Context, repo *git.Repository, v string) (versionReport, error) {
@@ -251,39 +244,28 @@ func reportVersion(ctx context.Context, repo *git.Repository, v string) (version
 	if err != nil {
 		return *report, fmt.Errorf("failed to get commit tree: %v", err)
 	}
-	modFile, err := tree.File("go.mod")
+	hs, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
+		modFile, err := tree.File("go.mod")
+		if err != nil {
+			return nil, err
+		}
+
+		blob, err := repo.BlobObject(modFile.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get blob object: %v", err)
+		}
+		return blob.Reader()
+	})
 	if err != nil {
-		if err == object.ErrFileNotFound {
+		if errors.Is(err, object.ErrFileNotFound) {
 			// This isn't necessarily an error: old versions didn't have go.mod files
 			return *report, nil
 		}
-		return *report, fmt.Errorf("go.mod not found: %v", err)
+		return *report, fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 
 	// Update report to note that we found a go.mod file.
-	report.gitGoMod = true
-
-	// Compute the SumDB hash of the file (this requires a double hash).
-	blob, err := repo.BlobObject(modFile.Hash)
-	if err != nil {
-		return *report, fmt.Errorf("failed to get blob object: %v", err)
-	}
-	gmh := sha256.New()
-	br, err := blob.Reader()
-	if err != nil {
-		return *report, fmt.Errorf("failed to get blob reader: %v", err)
-	}
-	defer func() {
-		if err := br.Close(); err != nil {
-			klog.Warningf("failed to close blob reader: %v", err)
-		}
-	}()
-	if _, err := io.Copy(gmh, br); err != nil {
-		return *report, fmt.Errorf("failed to calculate hash: %v", err)
-	}
-	preimage := fmt.Sprintf("%x  go.mod\n", gmh.Sum(nil))
-	got := sha256.Sum256([]byte(preimage))
-	report.gitModHash = got[:]
+	report.gitModHash = hs
 
 	return *report, nil
 }
@@ -296,23 +278,22 @@ type diffReport struct {
 type versionReport struct {
 	version string
 
-	// These fields are written in-order, as further info available.
-	// If not commit hash present, then the version tag was not found in git.
+	// These fields are written in-order, as further info becomes available.
+	// If no commit hash is present, then the version tag was not found in git.
 	gitCommitHash []byte
-	gitGoMod      bool
-	gitModHash    []byte
+	gitModHash    string
 
 	// If sumFound is not set, then no entry was found in SumDB so fields below
 	// should not be referenced.
 	sumFound   bool
 	sumIndex   uint64
-	sumModHash []byte
+	sumModHash string
 }
 
 type modData struct {
 	index   uint64
-	zipHash []byte
-	modHash []byte
+	zipHash string
+	modHash string
 }
 
 func queryIndex(ctx context.Context, vic *client.VIndexClient, modName string) (map[string]modData, error) {
@@ -361,18 +342,10 @@ func parseLeaf(idx uint64, data []byte) (string, modData, error) {
 		return "", modData{}, fmt.Errorf("mismatched version names: (%s, %s)", line0Version, line1Version)
 	}
 
-	zipHash, err := base64.StdEncoding.DecodeString(zipHashB64)
-	if err != nil {
-		return "", modData{}, fmt.Errorf("failed to decode hash %q: %v", zipHashB64, err)
-	}
-	modHash, err := base64.StdEncoding.DecodeString(modHashB64)
-	if err != nil {
-		return "", modData{}, fmt.Errorf("failed to decode hash %q: %v", modHashB64, err)
-	}
 	return line0Version, modData{
 		index:   idx,
-		zipHash: zipHash,
-		modHash: modHash,
+		zipHash: zipHashB64,
+		modHash: modHashB64,
 	}, nil
 }
 
