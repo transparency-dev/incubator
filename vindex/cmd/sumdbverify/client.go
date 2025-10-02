@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -93,7 +94,8 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to compile report: %v", reportErr)
 	}
 
-	fmt.Println(report.modName)
+	fmt.Printf("%s (./%s)\n", report.modName, report.modPath)
+
 	tw := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, "VERSION\tINDEX\tFOUND\tgo.mod\t"); err != nil {
 		return fmt.Errorf("failed to output report: %v", err)
@@ -128,22 +130,50 @@ func run(ctx context.Context) error {
 	return reportErr
 }
 
+func findGoMod(modRoot string) (string, error) {
+	goModPath := "go.mod"
+	if s, err := os.Stat(filepath.Join(modRoot, goModPath)); err == nil && !s.IsDir() {
+		return goModPath, nil
+	}
+
+	err := filepath.WalkDir(modRoot, func(path string, d fs.DirEntry, err error) error {
+		if !d.IsDir() && d.Name() == "go.mod" {
+			relPath, err := filepath.Rel(modRoot, path)
+			if err != nil {
+				return err
+			}
+			goModPath = relPath
+			return os.ErrExist
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrExist) {
+		return goModPath, nil
+	}
+
+	return "", fmt.Errorf("failed to read go.mod file: %v", err)
+}
+
 func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Context, string) (map[string]modData, error)) (diffReport, error) {
 	if s, err := os.Stat(modRoot); err != nil || !s.IsDir() {
 		return diffReport{}, errors.New("mod_root flag must be a directory")
 	}
-	modPathBytes, err := os.ReadFile(filepath.Join(modRoot, "go.mod"))
+	goModPath, err := findGoMod(modRoot)
+	if err != nil {
+		return diffReport{}, fmt.Errorf("failed to find go.mod file in %s", modRoot)
+	}
+	modPathBytes, err := os.ReadFile(filepath.Join(modRoot, goModPath))
 	if err != nil {
 		return diffReport{}, fmt.Errorf("failed to read go.mod file: %v", err)
 	}
-	modPath, err := modfile.Parse("go.mod", modPathBytes, nil)
-	if err != nil {
+	modName := modfile.ModulePath(modPathBytes)
+	if modName == "" {
 		return diffReport{}, fmt.Errorf("failed to parse go.mod file: %v", err)
 	}
-	modName := modPath.Module.Mod.Path
 
 	report := diffReport{
 		modName:  modName,
+		modPath:  goModPath,
 		versions: make([]versionReport, 0),
 	}
 
@@ -193,7 +223,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	for _, v := range sv {
 		sumHashes := versions[v]
 
-		vr, err := reportVersion(ctx, repo, v)
+		vr, err := reportVersion(ctx, repo, goModPath, v)
 		if err != nil {
 			vErrors = append(vErrors, fmt.Errorf("failed to get report for version %q: %v", v, err))
 		}
@@ -220,7 +250,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	return report, errors.Join(vErrors...)
 }
 
-func reportVersion(ctx context.Context, repo *git.Repository, v string) (versionReport, error) {
+func reportVersion(ctx context.Context, repo *git.Repository, goModPath string, v string) (versionReport, error) {
 	report := &versionReport{
 		version: v,
 	}
@@ -244,8 +274,14 @@ func reportVersion(ctx context.Context, repo *git.Repository, v string) (version
 	if err != nil {
 		return *report, fmt.Errorf("failed to get commit tree: %v", err)
 	}
+
+	// There is some gnarliness here:
+	//  - the path passed in must only be "go.mod" as that is used in the hash construction
+	//  - the path _may_ be nested, in reality
+	// The workaround is to pass in "go.mod" and then ignore it in the function, and just use
+	// the real path in the git directory when looking it up.
 	hs, err := dirhash.Hash1([]string{"go.mod"}, func(string) (io.ReadCloser, error) {
-		modFile, err := tree.File("go.mod")
+		modFile, err := tree.File(goModPath)
 		if err != nil {
 			return nil, err
 		}
@@ -272,6 +308,7 @@ func reportVersion(ctx context.Context, repo *git.Repository, v string) (version
 
 type diffReport struct {
 	modName  string
+	modPath  string
 	versions []versionReport
 }
 
