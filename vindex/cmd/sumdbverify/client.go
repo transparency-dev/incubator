@@ -18,6 +18,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -71,24 +72,63 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	if *baseURL == "" {
-		return errors.New("base_url flag must be provided")
-	}
-	if *outLogPubKey == "" {
-		return errors.New("out_log_pub_key flag must be provided")
-	}
 	if *modRoot == "" {
 		return errors.New("mod_root flag must be provided")
 	}
 
-	// TODO(mhutchinson): Support a non-VIndex version of this that reads the non-verifiable proxy endpoints:
-	// 1) https://proxy.golang.org/github.com/transparency-dev/tessera/@v/list
-	// 2) https://sum.golang.org/lookup/github.com/transparency-dev/tessera@v1.0.0
-	// This will provide a way to use this tool before the VIndex is widely available
-	sumFetcher := func(ctx context.Context, modName string) (map[string]modData, error) {
-		vic := newVIndexClientFromFlags()
+	var sumFetcher func(ctx context.Context, modName string) (map[string]modData, error)
+	if *baseURL == "" {
+		klog.Warningf("--base_url is not provided. Using NON-VERIFIABLE lookup to source SumDB data.")
 
-		return queryIndex(ctx, vic, modName)
+		// This constructs the map non-verifiably by calling similar URLs to these:
+		// 1) https://proxy.golang.org/github.com/transparency-dev/tessera/@v/list
+		// 2) https://sum.golang.org/lookup/github.com/transparency-dev/tessera@v1.0.0
+		sumFetcher = func(ctx context.Context, modName string) (map[string]modData, error) {
+			result := make(map[string]modData)
+			resp, err := http.Get(fmt.Sprintf("https://proxy.golang.org/%s/@v/list", modName))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get module listing: %v", err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get module listing: %v", err)
+			}
+			for v := range strings.Lines(string(body)) {
+				v = strings.TrimSpace(v)
+				resp, err = http.Get(fmt.Sprintf("https://sum.golang.org/lookup/%s@%s", modName, v))
+				if err != nil {
+					return nil, fmt.Errorf("failed to get version info: %v", err)
+				}
+				body, err = io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, fmt.Errorf("failed to get version info: %v", err)
+				}
+				lines := bytes.Split(body, []byte{'\n'})
+				idx, err := strconv.ParseInt(string(lines[0]), 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse index: %v", err)
+				}
+				leaf := append(append(append(lines[1], byte('\n')), lines[2]...), byte('\n'))
+				v2, md, err := parseLeaf(uint64(idx), leaf)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse leaf: %v", err)
+				}
+				if v != v2 {
+					return nil, fmt.Errorf("performed lookup for %s@%s but got version %s", modName, v, v2)
+				}
+				result[v] = md
+			}
+			return result, nil
+		}
+
+	} else {
+		if *outLogPubKey == "" {
+			return errors.New("out_log_pub_key flag must be provided if --base_url is provided")
+		}
+		sumFetcher = func(ctx context.Context, modName string) (map[string]modData, error) {
+			vic := newVIndexClientFromFlags()
+			return queryIndex(ctx, vic, modName)
+		}
 	}
 
 	report, reportErr := getReport(ctx, *modRoot, sumFetcher)
