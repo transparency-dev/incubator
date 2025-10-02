@@ -38,9 +38,11 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/transparency-dev/incubator/vindex/client"
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"golang.org/x/mod/sumdb/dirhash"
 	"golang.org/x/mod/sumdb/note"
+	"golang.org/x/mod/zip"
 	"golang.org/x/sync/errgroup"
 	"k8s.io/klog/v2"
 )
@@ -97,7 +99,7 @@ func run(ctx context.Context) error {
 	fmt.Printf("%s (./%s)\n", report.modName, report.modPath)
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
-	if _, err := fmt.Fprintln(tw, "VERSION\tINDEX\tFOUND\tgo.mod\t"); err != nil {
+	if _, err := fmt.Fprintln(tw, "VERSION\tINDEX\tFOUND\tgo.mod\tzip\t"); err != nil {
 		return fmt.Errorf("failed to output report: %v", err)
 	}
 	for _, v := range report.versions {
@@ -119,7 +121,15 @@ func run(ctx context.Context) error {
 		} else if v.gitModHash != v.sumModHash {
 			goMod = "❌"
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t\n", v.version, sumIndex, gitHash, goMod); err != nil {
+
+		goZip := "✅"
+		if v.gitCommitHash == nil || len(v.gitModHash) == 0 {
+			goZip = "⚠️"
+		} else if v.gitZipHash != v.sumZipHash {
+			klog.Warningf("zip: git != sum: %s != %s", v.gitZipHash, v.sumZipHash)
+			goZip = "❌"
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t\n", v.version, sumIndex, gitHash, goMod, goZip); err != nil {
 			return fmt.Errorf("failed to output report: %v", err)
 		}
 	}
@@ -223,12 +233,13 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	for _, v := range sv {
 		sumHashes := versions[v]
 
-		vr, err := reportVersion(ctx, repo, goModPath, v)
+		vr, err := reportVersion(ctx, modRoot, goModPath, modName, repo, v)
 		if err != nil {
 			vErrors = append(vErrors, fmt.Errorf("failed to get report for version %q: %v", v, err))
 		}
 		vr.sumFound = true
 		vr.sumModHash = sumHashes.modHash
+		vr.sumZipHash = sumHashes.zipHash
 		vr.sumIndex = sumHashes.index
 		report.versions = append(report.versions, vr)
 
@@ -250,8 +261,8 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	return report, errors.Join(vErrors...)
 }
 
-func reportVersion(ctx context.Context, repo *git.Repository, goModPath string, v string) (versionReport, error) {
-	report := &versionReport{
+func reportVersion(ctx context.Context, modRoot string, goModPath string, modName string, repo *git.Repository, v string) (versionReport, error) {
+	report := versionReport{
 		version: v,
 	}
 
@@ -259,7 +270,7 @@ func reportVersion(ctx context.Context, repo *git.Repository, goModPath string, 
 	ref := plumbing.NewTagReferenceName(v)
 	hash, err := repo.ResolveRevision(plumbing.Revision(ref))
 	if err != nil {
-		return *report, fmt.Errorf("failed to resolve tag '%s' to a commit: %v", ref, err)
+		return report, fmt.Errorf("failed to resolve tag '%s' to a commit: %v", ref, err)
 	}
 
 	// Update report to include the sha1 commit hash the tag points to.
@@ -268,11 +279,11 @@ func reportVersion(ctx context.Context, repo *git.Repository, goModPath string, 
 	// Find the go.mod file in this commit.
 	commit, err := repo.CommitObject(*hash)
 	if err != nil {
-		return *report, fmt.Errorf("failed to get commit object: %v", err)
+		return report, fmt.Errorf("failed to get commit object: %v", err)
 	}
 	tree, err := commit.Tree()
 	if err != nil {
-		return *report, fmt.Errorf("failed to get commit tree: %v", err)
+		return report, fmt.Errorf("failed to get commit tree: %v", err)
 	}
 
 	// There is some gnarliness here:
@@ -295,15 +306,39 @@ func reportVersion(ctx context.Context, repo *git.Repository, goModPath string, 
 	if err != nil {
 		if errors.Is(err, object.ErrFileNotFound) {
 			// This isn't necessarily an error: old versions didn't have go.mod files
-			return *report, nil
+			return report, nil
 		}
-		return *report, fmt.Errorf("failed to calculate file hash: %v", err)
+		return report, fmt.Errorf("failed to calculate file hash: %v", err)
 	}
 
-	// Update report to note that we found a go.mod file.
+	// Update the report with the mod hash, and then calculate the zip hash.
 	report.gitModHash = hs
+	f, err := os.CreateTemp("", "goModZip")
+	if err != nil {
+		return report, fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer func() {
+		if err := os.Remove(f.Name()); err != nil {
+			klog.Warningf("failed to remove temporary file: %v", err)
+		}
+	}()
+	modVer := module.Version{
+		Path:    modName,
+		Version: v,
+	}
+	subdir := filepath.Dir(goModPath)
+	if subdir == "." {
+		subdir = ""
+	}
+	if err := zip.CreateFromVCS(f, modVer, modRoot, hash.String(), subdir); err != nil {
+		return report, fmt.Errorf("failed to create zip file: %v", err)
+	}
+	report.gitZipHash, err = dirhash.HashZip(f.Name(), dirhash.Hash1)
+	if err != nil {
+		return report, fmt.Errorf("failed to hash zip file: %v", err)
+	}
 
-	return *report, nil
+	return report, nil
 }
 
 type diffReport struct {
@@ -319,12 +354,14 @@ type versionReport struct {
 	// If no commit hash is present, then the version tag was not found in git.
 	gitCommitHash []byte
 	gitModHash    string
+	gitZipHash    string
 
 	// If sumFound is not set, then no entry was found in SumDB so fields below
 	// should not be referenced.
 	sumFound   bool
 	sumIndex   uint64
 	sumModHash string
+	sumZipHash string
 }
 
 type modData struct {
