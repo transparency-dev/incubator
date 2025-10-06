@@ -142,6 +142,10 @@ func run(ctx context.Context) error {
 	if _, err := fmt.Fprintln(tw, "VERSION\tINDEX\tFOUND\tgo.mod\tzip\t"); err != nil {
 		return fmt.Errorf("failed to output report: %v", err)
 	}
+	reportErrors := make([]error, 0)
+	if reportErr != nil {
+		reportErrors = append(reportErrors, reportErr)
+	}
 	for _, v := range report.versions {
 		var sumIndex string
 		if v.sumFound {
@@ -159,6 +163,7 @@ func run(ctx context.Context) error {
 		if v.gitCommitHash == nil || len(v.gitModHash) == 0 {
 			goMod = "⚠️"
 		} else if v.gitModHash != v.sumModHash {
+			reportErrors = append(reportErrors, fmt.Errorf("failed to reproduce go.mod hash for version %q", v.version))
 			goMod = "❌"
 		}
 
@@ -166,7 +171,7 @@ func run(ctx context.Context) error {
 		if v.gitCommitHash == nil || len(v.gitModHash) == 0 {
 			goZip = "⚠️"
 		} else if v.gitZipHash != v.sumZipHash {
-			klog.Warningf("zip: git != sum: %s != %s", v.gitZipHash, v.sumZipHash)
+			reportErrors = append(reportErrors, fmt.Errorf("failed to reproduce zip hash for version %q", v.version))
 			goZip = "❌"
 		}
 		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t\n", v.version, sumIndex, gitHash, goMod, goZip); err != nil {
@@ -177,7 +182,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to flush report to stdout: %v", err)
 	}
 
-	return reportErr
+	return errors.Join(reportErrors...)
 }
 
 func findGoMod(modRoot string) (string, error) {
@@ -235,6 +240,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	var versions map[string]modData
 	var tags map[string]struct{}
 
+	klog.V(1).Info("Fetching tag and SumDB info")
 	eg.Go(func() error {
 		var err error
 		versions, err = sumFetcher(egctx, modName)
@@ -261,6 +267,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 	if err := eg.Wait(); err != nil {
 		return report, err
 	}
+	klog.V(1).Infof("Fetched %d tags and %d SumDB versions", len(tags), len(versions))
 
 	// Create a sorted slice of versions
 	sv := make([]string, 0, len(versions))
@@ -287,6 +294,7 @@ func getReport(ctx context.Context, modRoot string, sumFetcher func(context.Cont
 			delete(tags, v)
 		}
 	}
+	klog.V(1).Info("Finished compiling report")
 
 	// TODO(mhutchinson): Include information on tags in git that aren't in SumDB
 	// if len(tags) > 0 {
