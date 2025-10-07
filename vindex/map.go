@@ -316,7 +316,7 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 		return fmt.Errorf("failed to update state: %v", err)
 	}
 
-	klog.Infof("synced WAL to size %d", cp.Size)
+	klog.V(1).Infof("synced WAL to size %d", cp.Size)
 	return nil
 }
 
@@ -442,27 +442,10 @@ func (b *VerifiableIndex) Update(ctx context.Context) error {
 	if err := b.mapper.syncFromInputLog(ctx); err != nil {
 		return err
 	}
-	if err := b.buildMap(ctx, true); err != nil {
-		return err
-	}
-	return b.publish(ctx)
+	return b.buildMap(ctx, true)
 }
 
-func (b *VerifiableIndex) publish(ctx context.Context) error {
-	// Get the latest input log checkpoint the map was built from.
-	// TODO(mhutchinson): Possibly just pass this in?
-	inCp, inCloser, err := b.db.Get([]byte(dbLatestCheckpointKey))
-	if err != nil {
-		if err == pebble.ErrNotFound {
-			// If the key isn't there then nothing to do.
-			return nil
-		}
-		return fmt.Errorf("failed to read latest checkpoint: %v", err)
-	}
-	if err := inCloser.Close(); err != nil {
-		return fmt.Errorf("failed to close: %v", err)
-	}
-
+func (b *VerifiableIndex) publish(ctx context.Context, inCp []byte) error {
 	// Construct the leaf for the output log
 	rootNode, err := b.vstore.Load(ctx, prefix.RootLabel)
 	if err != nil {
@@ -516,8 +499,13 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		return fmt.Errorf("failed to parse checkpoint: %v", err)
 	}
 
-	klog.V(1).Infof("buildMap [%d, %d): parsing WAL", b.servingSize, size)
-	for i := b.servingSize; i < size; {
+	from, to := b.servingSize, size
+	if from == to {
+		klog.V(1).Infof("buildMap [%d, %d): nothing to do", from, to)
+		return nil
+	}
+	klog.V(1).Infof("buildMap [%d, %d): parsing WAL", from, to)
+	for i := from; i < to; {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -590,8 +578,12 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 	durationTotal := time.Since(startWal)
 
 	b.servingSize = size
-	klog.Infof("buildMap: total=%s (wal=%s, vindex=%s)", durationTotal, durationWal, durationVIndex)
-	return nil
+	klog.Infof("buildMap [%d, %d): total=%s (wal=%s, vindex=%s)", from, to, durationTotal, durationWal, durationVIndex)
+
+	// This publish occurs within the indexMu lock intentionally.
+	// This allows Lookup to always assume that the last leaf in the Output Log is the
+	// one that commits to the current state of the index.
+	return b.publish(ctx, cpRaw)
 }
 
 // checkpointUnsafe parses a checkpoint without performing any signature verification.
