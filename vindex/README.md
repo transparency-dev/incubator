@@ -1,6 +1,8 @@
 ## Verifiable Index
 
-Status: Experimental. Goal is to have MVP by 2025Q3. See [Milestones](#milestones) for detailed feature progress.
+Status: Working Prototype of an end-to-end verifiable index for transparency logs. See [Milestones](#milestones) for detailed feature progress.
+
+There is a complete solution provided for the [Go Module Proxy (SumDB) log](./cmd/sumdb/).
 
 This idea has been distilled from years of experiments with maps, and a pressing need to have an efficient and verifiable way for an end-user to find _their_ data in logs without needing to download the whole log.
 
@@ -39,8 +41,8 @@ The result is a system that extends the verifiability of the underlying log to i
 
 This verifiable map can be applied to any log where users have a need to enumerate all values matching a specific query. For example:
 
-* CT: domain owners wish to query for all certs matching a particular domain  
-* SumDB: package owners want to find all releases for a given package
+* CT: domain owners wish to query for all certs matching a domain they own
+* [SumDB](./cmd/sumdb/): package owners want to find all releases for a package they maintain
 
 Indices exist for both ecosystems at the moment, but they aren’t verifiable.
 
@@ -99,6 +101,10 @@ Verifying this involves verifying the following chain:
 The correct construction of the map can be verified by any other party.
 The only requirement is compute resources to be able to build the map, and a clear understanding of the MapFn (hence the importance for this to be universally specified).
 The verifier builds a map at the same size as the verifiable index and if the map checkpoint has the same root hash then both maps are equivalent and the map has been verified for correct construction.
+
+## Architecture
+
+![Architecture Diagram](./vindex-arch.png)
 
 ## Sub-Problems
 
@@ -184,6 +190,7 @@ Known applications:
 
 ## Milestones
 
+
 |  #  | Step                                                      | Status |
 | :-: | --------------------------------------------------------- | :----: |
 |  1  | Public code base and documentation for prototype          |   ✅   |
@@ -195,11 +202,11 @@ Known applications:
 |  7  | Storage backed verifiable-map                             |   ✅   |
 |  8  | MapFn defined in WASM                                     |   ❌   |
 |  9  | Support reading directly from Input Log instead of Clone  |   ✅   |
-|  10 | Example written for mapping SumDB                         |   ✅   |
+|  10 | Example written for indexing SumDB                        |   ✅   |
 |  11 | Example written for hosting a log and VIndex together     |   ✅   |
-|  12 | Example written for mapping CT                            |   ⚠️   |
-|  13 | Promote this from the `incubator` repo                    |   ❌   |
+|  12 | Example written for indexing CT                           |   ⚠️   |
+|  13 | Replace Merkle Tree with a faster implementation          |   ❌   |
+|  14 | Promote this from the `incubator` repo                    |   ❌   |
 |  N  | Production ready                                          |   ❌   |
 
 
-Note that a storage-backed map needs to be implemented before this can be applied to larger logs, e.g. CT.
