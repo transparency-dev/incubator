@@ -69,7 +69,9 @@ type InputLog interface {
 	// Parse unmarshals and verifies a checkpoint obtained from GetCheckpoint.
 	Parse(checkpoint []byte) (*log.Checkpoint, error)
 	// Leaves returns all the leaves in the range [start, end), outputting them via
-	// the returned iterator.
+	// the returned iterator. The returned bytes MUST be the leaf preimages,
+	// i.e. hashing these values should return the leaf hashes used to construct the
+	// Merkle tree.
 	Leaves(ctx context.Context, start, end uint64) iter.Seq2[[]byte, error]
 }
 
