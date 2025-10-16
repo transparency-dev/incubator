@@ -102,6 +102,10 @@ The correct construction of the map can be verified by any other party.
 The only requirement is compute resources to be able to build the map, and a clear understanding of the MapFn (hence the importance for this to be universally specified).
 The verifier builds a map at the same size as the verifiable index and if the map checkpoint has the same root hash then both maps are equivalent and the map has been verified for correct construction.
 
+## Architecture
+
+![Architecture Diagram](./vindex-arch.png)
+
 ## Sub-Problems
 
 ### MapFn Specified in Universal Language
