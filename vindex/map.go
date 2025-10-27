@@ -558,6 +558,11 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		b.indexMu.Lock()
 		defer b.indexMu.Unlock()
 		for h := range updatedKeys {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 			idxes := b.data[h]
 
 			// Here we hash by simply appending all indices in the list and hashing that
