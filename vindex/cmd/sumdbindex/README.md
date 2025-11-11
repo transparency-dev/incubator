@@ -39,7 +39,7 @@ The Verifiable Index and Output Log are managed by a single binary, which can be
 
 ```shell
 OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+SumDBIndex+a5ed0e81+AYT6tfHpqGaSoH0gYpM7fhj1tEkM3wwYR/IhtiYh1pnj \
-go run ./vindex/cmd/sumdb \
+go run ./vindex/cmd/sumdbindex \
   --storage_dir ~/vindex-sumdb/
 ```
 
