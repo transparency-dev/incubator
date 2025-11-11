@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// sumdb brings up a verifiable index for the Go SumDB.
+// sumdbindex brings up a verifiable index for the Go SumDB.
 // This requires a proxy to be running to bridge to a tlog-tiles API.
 // See the README for usage details.
 package main

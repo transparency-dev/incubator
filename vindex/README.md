@@ -2,7 +2,7 @@
 
 Status: Working Prototype of an end-to-end verifiable index for transparency logs. See [Milestones](#milestones) for detailed feature progress.
 
-There is a complete solution provided for the [Go Module Proxy (SumDB) log](./cmd/sumdb/).
+There is a complete solution provided for the [Go Module Proxy (SumDB) log](./cmd/sumdbindex/).
 
 This idea has been distilled from years of experiments with maps, and a pressing need to have an efficient and verifiable way for an end-user to find _their_ data in logs without needing to download the whole log.
 
@@ -42,7 +42,7 @@ The result is a system that extends the verifiability of the underlying log to i
 This verifiable map can be applied to any log where users have a need to enumerate all values matching a specific query. For example:
 
 * CT: domain owners wish to query for all certs matching a domain they own
-* [SumDB](./cmd/sumdb/): package owners want to find all releases for a package they maintain
+* [SumDB](./cmd/sumdbindex/): package owners want to find all releases for a package they maintain
 
 Indices exist for both ecosystems at the moment, but they aren’t verifiable.
 
@@ -185,7 +185,7 @@ Values are an ordered list of indices.
 ## Status
 
 Known applications:
-  - [./cmd/sumdb/](./cmd/sumdb/) contains a binary that builds a verifiable index from the contents of the [Go SumDB](https://sum.golang.org/).
+  - [./cmd/sumdbindex/](./cmd/sumdbindex/) contains a binary that builds a verifiable index from the contents of the [Go SumDB](https://sum.golang.org/).
   - [./cmd/logandmap/](./cmd/logandmap/) contains a demo of running a [tlog-tiles][] log using [Tessera][], and keeping the contents of that log synced to a VIndex
 
 ## Milestones
