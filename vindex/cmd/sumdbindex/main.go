@@ -38,17 +38,20 @@ import (
 	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/sumdb"
 	"github.com/transparency-dev/incubator/vindex"
+	"github.com/transparency-dev/tessera"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
 
 var (
-	outputLogPrivKeyFile = flag.String("output_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
-	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Output Log, and allocate space to store the verifiable map persistence.")
-	persistIndex         = flag.Bool("persist_index", false, "Set to true to use a disk-based implementation of the verifiable index. This can be slow, but useful in situations where memory is constrained.")
-	witnessSigs          = flag.Uint("witnesses", 0, "Number of witness signatures required on the SumDB checkpoint. Setting this will pull checkpoints from the transparency-dev prod distributor.")
-	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
+	outputLogPrivKeyFile     = flag.String("output_log_private_key_path", "", "Location of private key file. If unset, uses the contents of the OUTPUT_LOG_PRIVATE_KEY environment variable.")
+	storageDir               = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Output Log, and allocate space to store the verifiable map persistence.")
+	persistIndex             = flag.Bool("persist_index", false, "Set to true to use a disk-based implementation of the verifiable index. This can be slow, but useful in situations where memory is constrained.")
+	witnessSigs              = flag.Uint("witnesses", 0, "Number of witness signatures required on the SumDB checkpoint. Setting this will pull checkpoints from the transparency-dev prod distributor.")
+	outputLogWitnesses       = flag.String("output_log_witness_policy", "", "Path to witness policy file that describes which witnesses to request before publishing an output checkpoint")
+	outputLogWitnessFailOpen = flag.Bool("output_log_witness_fail_open", true, "Set to false to block publishing new checkpoints if witnesses cannot be reached")
+	listen                   = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
 )
 
 var (
@@ -135,7 +138,21 @@ func run(ctx context.Context) error {
 func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func()) {
 	s, v := getOutputLogSignerVerifierOrDie()
 
-	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v)
+	olopts := vindex.OutputLogOpts{}
+	if len(*outputLogWitnesses) > 0 {
+		bs, err := os.ReadFile(*outputLogWitnesses)
+		if err != nil {
+			klog.Exitf("Failed to read witness policy file: %v", err)
+		}
+		wits, err := tessera.NewWitnessGroupFromPolicy(bs)
+		if err != nil {
+			klog.Exitf("Failed to create witness policy from file: %v", err)
+		}
+
+		olopts.WitnessFailOpen = *outputLogWitnessFailOpen
+		olopts.Witnesses = &wits
+	}
+	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v, olopts)
 	if err != nil {
 		klog.Exitf("Failed to create Output Log: %v", err)
 	}
