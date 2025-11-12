@@ -83,7 +83,7 @@ func TestVerifiableIndex(t *testing.T) {
 	}
 
 	old := path.Join(f.Name(), "outputlog")
-	outputLog, closer, err := vindex.NewOutputLog(ctx, old, s, v)
+	outputLog, closer, err := vindex.NewOutputLog(ctx, old, s, v, vindex.OutputLogOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestVerifiableIndex_concurrency(t *testing.T) {
 			}
 
 			old := path.Join(f.Name(), "outputlog")
-			outputLog, closer, err := vindex.NewOutputLog(ctx, old, s, v)
+			outputLog, closer, err := vindex.NewOutputLog(ctx, old, s, v, vindex.OutputLogOpts{})
 			if err != nil {
 				t.Fatal(err)
 			}

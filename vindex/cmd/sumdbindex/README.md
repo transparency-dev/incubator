@@ -54,6 +54,14 @@ The command above starts a web server that hosts the following URLs:
 > This brings up a proxy server that makes SumDB available via the local server at `/inputlog/`.
 > This allows the Verifiable Index and its clients to use standard [tlog-tiles][] APIs to query the data, instead of requiring a custom client for SumDB.
 
+#### Witnessing
+
+The Output Log supports synchronous witnessing using the [tlog-witness](https://c2sp.org/tlog-witness) spec.
+Before a new Output Log checkpoint is published, this will request witness signatures and include them in the published checkpoint.
+
+In order to do this, the `--output_log_witness_policy` flag should be used to provide a filepath containing a [valid witness policy](https://git.glasklar.is/sigsum/core/sigsum-go/-/blob/main/doc/policy.md).
+An example policy using the [public test witness network](https://witness-network.org/) can be found at https://github.com/transparency-dev/tesseract/blob/main/deployment/live/gcp/static-ct-staging/logs/witness.policy.
+
 ### Querying 
 
 #### Auditing Local Modules

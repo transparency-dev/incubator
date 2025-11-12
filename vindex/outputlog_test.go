@@ -73,7 +73,7 @@ func TestOutputLog_Lookup(t *testing.T) {
 				_ = os.RemoveAll(dir)
 			}()
 
-			log, closer, err := vindex.NewOutputLog(t.Context(), dir, s, v)
+			log, closer, err := vindex.NewOutputLog(t.Context(), dir, s, v, vindex.OutputLogOpts{})
 			if err != nil {
 				t.Fatal(err)
 			}

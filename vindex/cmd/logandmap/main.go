@@ -197,7 +197,7 @@ func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq
 func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func()) {
 	s, v := getOutputLogSignerVerifierOrDie()
 
-	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v)
+	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v, vindex.OutputLogOpts{})
 	if err != nil {
 		klog.Exit(err)
 	}

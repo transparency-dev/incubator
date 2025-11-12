@@ -30,17 +30,27 @@ import (
 	"golang.org/x/mod/sumdb/note"
 )
 
+type OutputLogOpts struct {
+	Witnesses       *tessera.WitnessGroup
+	WitnessFailOpen bool
+}
+
 // outputLogOrDie returns an output log using a POSIX log in the given directory.
-func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v note.Verifier) (log OutputLog, closer func(), err error) {
+func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v note.Verifier, opts OutputLogOpts) (log OutputLog, closer func(), err error) {
 	driver, err := posix.New(ctx, posix.Config{Path: outputLogDir})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create input log: %v", err)
 	}
 
-	appender, shutdown, reader, err := tessera.NewAppender(ctx, driver, tessera.NewAppendOptions().
+	appendOpts := tessera.NewAppendOptions().
 		WithCheckpointSigner(s).
 		WithCheckpointInterval(1*time.Second).
-		WithBatching(1, time.Second))
+		WithBatching(1, time.Second)
+
+	if opts.Witnesses != nil {
+		appendOpts.WithWitnesses(*opts.Witnesses, &tessera.WitnessOptions{FailOpen: opts.WitnessFailOpen})
+	}
+	appender, shutdown, reader, err := tessera.NewAppender(ctx, driver, appendOpts)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get appender: %v", err)
 	}
