@@ -3,6 +3,8 @@
 This is a demo of building a [Verifiable Index](../../README.md) for [Go's Checksum Database](https://go.dev/ref/mod#checksum-database).
 The index allows module maintainers to verifiably look up all [non-pseudo](https://pkg.go.dev/golang.org/x/mod@v0.28.0/module#IsPseudoVersion) versions of their module served by the Module Proxy.
 
+There is a testing instance of this service running at https://vindex.gopherwatch.org.
+
 ### Background
 
 The sum.golang.org service, often referred to as Go Checksum DB or SumDB, serves as an auditable checksum database for Go modules. Its primary purpose is to enhance the security and integrity of the Go module ecosystem by providing a public, tamper-proof record of module checksums. This ensures that when developers fetch a module, they receive the exact version of the code that others are using and that hasn't been maliciously altered.
