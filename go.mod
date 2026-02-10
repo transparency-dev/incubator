@@ -5,7 +5,7 @@ go 1.24.1
 require (
 	filippo.io/torchwood v0.8.0
 	github.com/cockroachdb/pebble v1.1.5
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
 	github.com/transparency-dev/formats v0.0.0-20251017110053-404c0d5b696c
