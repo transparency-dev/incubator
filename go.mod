@@ -3,15 +3,15 @@ module github.com/transparency-dev/incubator
 go 1.24.1
 
 require (
-	filippo.io/torchwood v0.8.0
+	filippo.io/torchwood v0.9.0
 	github.com/cockroachdb/pebble v1.1.5
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
-	github.com/transparency-dev/formats v0.0.0-20251017110053-404c0d5b696c
+	github.com/transparency-dev/formats v0.0.0-20251208091212-1378f9e1b1b7
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/transparency-dev/tessera v1.0.1
-	golang.org/x/mod v0.31.0
+	golang.org/x/mod v0.33.0
 	golang.org/x/sync v0.19.0
 	k8s.io/klog/v2 v2.130.1
 )
