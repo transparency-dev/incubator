@@ -18,6 +18,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -30,7 +31,6 @@ import (
 	"os/signal"
 	"path"
 
-	"strings"
 	"syscall"
 	"time"
 
@@ -219,21 +219,26 @@ func getKeyFile(path string) (string, error) {
 }
 
 func mapFn(data []byte) [][32]byte {
-	lines := strings.Split(string(data), "\n")
-	if len(lines) < 2 {
-		panic(fmt.Errorf("expected 2 lines but got %d", len(lines)))
+	modEnd := bytes.IndexByte(data, ' ')
+	if modEnd == -1 {
+		panic("invalid line 0: no space")
 	}
 
-	line0Parts := strings.Fields(lines[0])
-	if len(line0Parts) < 2 {
-		panic(fmt.Errorf("expected at least 2 parts in line 0 but got %d", len(line0Parts)))
+	verStart := modEnd + 1
+	verLen := bytes.IndexByte(data[verStart:], ' ')
+	if verLen == -1 {
+		panic("invalid line 0: no second space")
 	}
-	line0Module, line0Version := line0Parts[0], line0Parts[1]
+	verBytes := data[verStart : verStart+verLen]
 
-	if module.IsPseudoVersion(line0Version) {
-		// Drop any emphemeral builds
-		return nil
+	// Fast path: pseudo-versions always contain a dash.
+	if bytes.IndexByte(verBytes, '-') != -1 {
+		// Only allocate a string and call IsPseudoVersion if a dash is present.
+		if module.IsPseudoVersion(string(verBytes)) {
+			// Drop any ephemeral builds
+			return nil
+		}
 	}
 
-	return [][32]byte{sha256.Sum256([]byte(line0Module))}
+	return [][32]byte{sha256.Sum256(data[:modEnd])}
 }
