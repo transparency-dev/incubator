@@ -53,6 +53,9 @@ var (
 	outputLogWitnesses       = flag.String("output_log_witness_policy", "", "Path to witness policy file that describes which witnesses to request before publishing an output checkpoint")
 	outputLogWitnessFailOpen = flag.Bool("output_log_witness_fail_open", true, "Set to false to block publishing new checkpoints if witnesses cannot be reached")
 	listen                   = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
+
+	oneShot          = flag.Bool("oneshot", false, "Set to true to build the map once and then exit")
+	inputOverrideUrl = flag.String("input_override_url", "", "Set this to read from a different URL than the local proxy. Supports file paths. Intended for performance testing. Note this log MUST be presented as tlog-tiles format.")
 )
 
 func main() {
@@ -68,17 +71,13 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	// Set up storage for the input log, index, and output log.
+	// Set up storage for the index and output log.
 	if *storageDir == "" {
 		return errors.New("storage_dir must be set")
 	}
-	inputLogDir := path.Join(*storageDir, "inputlog")
 	outputLogDir := path.Join(*storageDir, "outputlog")
 	mapRoot := path.Join(*storageDir, "vindex")
 
-	if err := os.MkdirAll(inputLogDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create input log directory: %v", err)
-	}
 	if err := os.MkdirAll(outputLogDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create output log directory: %v", err)
 	}
@@ -90,7 +89,14 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	sumUrl, err := url.Parse(fmt.Sprintf("http://%s/inputlog/", *listen))
+
+	var inPath string
+	if *inputOverrideUrl == "" {
+		inPath = fmt.Sprintf("http://%s/inputlog/", *listen)
+	} else {
+		inPath = *inputOverrideUrl
+	}
+	sumUrl, err := url.Parse(inPath)
 	if err != nil {
 		return err
 	}
@@ -121,10 +127,18 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("failed to start web server: %v", err)
 	}
 
+	if *oneShot {
+		if err := vi.Update(ctx); err != nil {
+			return fmt.Errorf("failed to Update index: %v", err)
+		}
+		return nil
+	}
+
 	// Keeps the map synced with the latest published input log state.
 	go maintainMap(ctx, vi)
 
 	<-ctx.Done()
+
 	return nil
 }
 
