@@ -57,6 +57,7 @@ func newWalWriter(walPath string, treeSize uint64) (*walWriter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file for writing: %s", err)
 	}
+	w.bw = bufio.NewWriter(w.f)
 	return w, err
 }
 
@@ -66,10 +67,15 @@ func newWalWriter(walPath string, treeSize uint64) (*walWriter, error) {
 type walWriter struct {
 	walPath string
 	f       *os.File
+	bw      *bufio.Writer
 }
 
 func (l *walWriter) close() error {
-	return l.f.Close()
+	err := l.bw.Flush()
+	if cerr := l.f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // validate reads the file and determines what the last mapped log index was, and returns it.
@@ -160,6 +166,9 @@ func validate(walPath string, lastIdx uint64) error {
 }
 
 func (l *walWriter) flush() error {
+	if err := l.bw.Flush(); err != nil {
+		return err
+	}
 	return l.f.Sync()
 }
 
@@ -168,7 +177,7 @@ func (l *walWriter) append(idx uint64, hashes [][sha256.Size]byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal entry: %v", err)
 	}
-	_, err = fmt.Fprintf(l.f, "%s\n", e)
+	_, err = fmt.Fprintf(l.bw, "%s\n", e)
 	return err
 }
 
