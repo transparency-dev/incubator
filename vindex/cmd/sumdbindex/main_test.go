@@ -14,6 +14,9 @@ var pseudoVersionLeaf = []byte(`github.com/transparency-dev/tessera v0.0.0-20240
 github.com/transparency-dev/tessera v0.0.0-20240222160914-411202e8d356/go.mod h1:T/Ym+5H1e28Qv6iMzT3w=
 `)
 
+var releaseCandidateLeaf = []byte(`github.1485827954.workers.dev/aws/amazon-vpc-cni-k8s v1.7.0-rc1 h1:f1nwnVa7t5Ftd+BPef/V/Y8XxT1Sdiif0cdIo/8R9i0=
+github.1485827954.workers.dev/aws/amazon-vpc-cni-k8s v1.7.0-rc1/go.mod h1:CuxOEw4CmUSK44owsXWkZ6Njh0G/gfboQoLl9hn1Voo=`)
+
 func TestMapFn(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -29,6 +32,11 @@ func TestMapFn(t *testing.T) {
 			name: "pseudo_version",
 			leaf: pseudoVersionLeaf,
 			want: nil,
+		},
+		{
+			name: "release_candidate",
+			leaf: releaseCandidateLeaf,
+			want: [][32]byte{sha256.Sum256([]byte("github.1485827954.workers.dev/aws/amazon-vpc-cni-k8s"))},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,5 +56,7 @@ func TestMapFn(t *testing.T) {
 func BenchmarkMapFn(b *testing.B) {
 	for b.Loop() {
 		mapFn(exampleLeaf)
+		mapFn(pseudoVersionLeaf)
+		mapFn(releaseCandidateLeaf)
 	}
 }
