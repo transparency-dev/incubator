@@ -207,7 +207,7 @@ func TestWriteAheadLog_roundtrip(t *testing.T) {
 	}
 }
 
-func TestWriteAndWriteLog(t *testing.T) {
+func TestWriteAndReadLog(t *testing.T) {
 	f, err := os.CreateTemp("", "testWal")
 	if err != nil {
 		t.Fatal(err)
@@ -237,8 +237,13 @@ func TestWriteAndWriteLog(t *testing.T) {
 			if err := wal.append(uint64(i), [][sha256.Size]byte{hash}); err != nil {
 				return err
 			}
+			if i%256 == 0 {
+				if err := wal.flush(); err != nil {
+					return err
+				}
+			}
 		}
-		return nil
+		return wal.flush()
 	})
 	eg.Go(func() error {
 		var expect uint64
