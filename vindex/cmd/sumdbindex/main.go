@@ -29,7 +29,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
-	"regexp"
+
 	"strings"
 	"syscall"
 	"time"
@@ -52,15 +52,6 @@ var (
 	outputLogWitnesses       = flag.String("output_log_witness_policy", "", "Path to witness policy file that describes which witnesses to request before publishing an output checkpoint")
 	outputLogWitnessFailOpen = flag.Bool("output_log_witness_fail_open", true, "Set to false to block publishing new checkpoints if witnesses cannot be reached")
 	listen                   = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
-)
-
-var (
-	// Example leaf:
-	// golang.org/x/text v0.3.0 h1:g61tztE5qeGQ89tm6NTjjM9VPIm088od1l6aSorWRWg=
-	// golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
-	//
-	line0RE = regexp.MustCompile(`(.*) (.*) h1:(.*)`)
-	line1RE = regexp.MustCompile(`(.*) (.*)/go.mod h1:(.*)`)
 )
 
 func main() {
@@ -233,24 +224,16 @@ func mapFn(data []byte) [][32]byte {
 		panic(fmt.Errorf("expected 2 lines but got %d", len(lines)))
 	}
 
-	line0Parts := line0RE.FindStringSubmatch(lines[0])
-	line0Module, line0Version := line0Parts[1], line0Parts[2]
-
-	line1Parts := line1RE.FindStringSubmatch(lines[1])
-	line1Module, line1Version := line1Parts[1], line1Parts[2]
-
-	if line0Module != line1Module {
-		klog.Errorf("mismatched module names: (%s, %s)", line0Module, line1Module)
+	line0Parts := strings.Fields(lines[0])
+	if len(line0Parts) < 2 {
+		panic(fmt.Errorf("expected at least 2 parts in line 0 but got %d", len(line0Parts)))
 	}
-	if line0Version != line1Version {
-		klog.Errorf("mismatched version names: (%s, %s)", line0Version, line0Version)
-	}
+	line0Module, line0Version := line0Parts[0], line0Parts[1]
+
 	if module.IsPseudoVersion(line0Version) {
 		// Drop any emphemeral builds
 		return nil
 	}
-
-	klog.V(2).Infof("MapFn found: Module: %s:\t%s", line0Module, line0Version)
 
 	return [][32]byte{sha256.Sum256([]byte(line0Module))}
 }
