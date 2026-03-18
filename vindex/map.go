@@ -274,7 +274,11 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 			}
 			workDone()
 
-			storeCompactRange := m.r.End()%256 == 0 || m.r.End() == cp.Size
+			// This is a performance tradeoff between flushing very often and allowing data to be indexed quickly,
+			// and too often, and having things block on syscalls. One full level-1 tile seems to be a good tradeoff.
+			const storeInterval = 256 * 256
+
+			storeCompactRange := m.r.End()%storeInterval == 0 || m.r.End() == cp.Size
 			if len(hashes) == 0 && !storeCompactRange {
 				// We can skip writing out values with no hashes, as long as we're
 				// not at the end of the log.
@@ -287,8 +291,6 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 			}
 			if storeCompactRange {
 				// Periodically store the validated compact range consumed so far.
-				// The choice to align with every 256 entries is an implicit bias towards
-				// supporting tlog-tiles.
 				if err := m.walWriter.flush(); err != nil {
 					return fmt.Errorf("failed to flush the WAL: %v", err)
 				}
