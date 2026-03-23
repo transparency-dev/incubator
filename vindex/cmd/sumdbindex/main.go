@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -116,7 +117,9 @@ func run(ctx context.Context) error {
 	}
 
 	// Run a web server to serve the input log, index, and output log.
-	go runWebServer(sumProxy, vi, outputLogDir)
+	if err := runWebServer(sumProxy, vi, outputLogDir); err != nil {
+		return fmt.Errorf("failed to start web server: %v", err)
+	}
 
 	// Keeps the map synced with the latest published input log state.
 	go maintainMap(ctx, vi)
@@ -167,7 +170,7 @@ func maintainMap(ctx context.Context, vi *vindex.VerifiableIndex) {
 	}
 }
 
-func runWebServer(inLog *httputil.ReverseProxy, vi *vindex.VerifiableIndex, outLogDir string) {
+func runWebServer(inLog *httputil.ReverseProxy, vi *vindex.VerifiableIndex, outLogDir string) error {
 	web := NewServer(vi.Lookup)
 
 	olfs := http.FileServer(http.Dir(outLogDir))
@@ -175,16 +178,22 @@ func runWebServer(inLog *httputil.ReverseProxy, vi *vindex.VerifiableIndex, outL
 	r.PathPrefix("/inputlog/").Handler(inLog)
 	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
 	web.registerHandlers(r)
+
+	listener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+
 	hServer := &http.Server{
-		Addr:    *listen,
 		Handler: r,
 	}
 	go func() {
-		if err := hServer.ListenAndServe(); err != http.ErrServerClosed {
+		if err := hServer.Serve(listener); err != http.ErrServerClosed {
 			klog.Warningf("Error from HTTP server: %v", err)
 		}
 	}()
 	klog.Infof("Started HTTP server listening on %s", *listen)
+	return nil
 }
 
 // Read output log private key from file or environment variable and generate the
