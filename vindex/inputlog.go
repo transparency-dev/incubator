@@ -26,6 +26,13 @@ import (
 	"golang.org/x/mod/sumdb/note"
 )
 
+// fetcher describes a struct which knows how to retrieve tlog-tiles artifacts from a log.
+type fetcher interface {
+	ReadCheckpoint(ctx context.Context) ([]byte, error)
+	ReadTile(ctx context.Context, l, i uint64, p uint8) ([]byte, error)
+	ReadEntryBundle(ctx context.Context, i uint64, p uint8) ([]byte, error)
+}
+
 type InputLogOpts struct {
 	HttpClient *http.Client
 	Origin     string
@@ -40,12 +47,22 @@ func NewTiledInputLog(base *url.URL, v note.Verifier, o InputLogOpts) (InputLog,
 		o.Origin = v.Name()
 	}
 
-	f, err := client.NewHTTPFetcher(base, o.HttpClient)
-	if err != nil {
-		return nil, err
+	var src fetcher
+
+	if base.Scheme == "file" {
+		src = &client.FileFetcher{
+			Root: base.Path,
+		}
+	} else {
+		var err error
+		src, err = client.NewHTTPFetcher(base, o.HttpClient)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	return logReaderSource{
-		f:    f,
+		f:    src,
 		v:    v,
 		opts: o,
 	}, nil
@@ -53,7 +70,7 @@ func NewTiledInputLog(base *url.URL, v note.Verifier, o InputLogOpts) (InputLog,
 
 // logReaderSource adapts a tessera.LogReader to a vindex.InputLog.
 type logReaderSource struct {
-	f    *client.HTTPFetcher
+	f    fetcher
 	v    note.Verifier
 	opts InputLogOpts
 }
