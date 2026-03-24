@@ -90,10 +90,8 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	var inPath string
-	if *inputOverrideUrl == "" {
-		inPath = fmt.Sprintf("http://%s/inputlog/", *listen)
-	} else {
+	inPath := fmt.Sprintf("http://%s/inputlog/", *listen)
+	if *inputOverrideUrl != "" {
 		inPath = *inputOverrideUrl
 	}
 	sumUrl, err := url.Parse(inPath)
