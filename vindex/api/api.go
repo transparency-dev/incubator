@@ -54,16 +54,3 @@ type IndexNode struct {
 	LabelPath   []byte            `json:"label_path"`
 	Hash        [sha256.Size]byte `json:"hash"`
 }
-
-// OutputLogLeaf describes a leaf in the output log.
-//
-// This leaf is a statement that commits to the result of generating a map from a
-// given input log size. To do this, it binds the Input Log state (in the form of
-// a checkpoint), to a single hash, which is the Merkle Tree root hash for the index.
-type OutputLogLeaf struct {
-	// InputLogCP is the checkpoint from the input log that commits to
-	// the state of the log that the index was derived from.
-	InputLogCP []byte `json:"input_log_cp"`
-	// IndexRoot is the root hash of the Merkle Tree for the verifiable index.
-	IndexRoot [sha256.Size]byte `json:"index_root"`
-}
