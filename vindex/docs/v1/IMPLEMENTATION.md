@@ -6,7 +6,7 @@ This document outlines the first-draft technical implementation plan for a produ
 
 The system is deployed as a single combined daemon (`vindexd`) alongside a WASM SDK. To enforce the separation of concerns, the daemon is internally split into three core sub-components that communicate with a legally shared key-value store:
 - `Batch Builder / Mapper`: A background routine that polling-ingests the Input Log, verifies the leaf data is included in the log, runs the WASM mapping, and yields a stream of batches of mapped key-value pairs.
-- `Index Updater`: A routine that takes the mapped pairs, updates the key-value store, updates the Verifiable Prefix Trie (MPT), and commits the new state to the Output Log.
+- `Index Updater`: A routine that takes the mapped pairs, updates the key-value store, updates the Verifiable Merkle Prefix Trie (MPT), and commits the new state to the Output Log.
 - `Read Server`: A read-only API multiplexer that serves client queries from the MPT and KV store. Because it shares the `pebble.DB` reference, it exclusively uses the latest published Output Log state to natively ignore any inflight writes from the Index Updater.
 
 **Daemon Flags Protocol**:
@@ -14,7 +14,7 @@ The system is deployed as a single combined daemon (`vindexd`) alongside a WASM 
 - `--output_log_dir`: The directory where Output Log tiles will be written.
 - `--db_path`: The directory where the Pebble database will be stored.
 - `--wasm_path`: The path to the MapFn WASM module.
-- `--poll_interval`: The duration between polling ticks (e.g. 10s).
+- `--poll_interval`: The interval between polling ticks (e.g. 10s).
 - `--port`: The port to listen on for HTTP client queries.
 - `wasm-tool` (or SDK): A component consisting of:
     - A Go library (`github.com/transparency-dev/vindex/wasm/guest`) that users import to register their `MapFn` and handle low-level marshalling (see [WASM Guest SDK Preview](#6-wasm-guest-sdk-preview)).
