@@ -26,6 +26,9 @@ This verifiable map can be applied to any existing log where users need to enume
 - **Go Software Supply Chain (SumDB)**: Package owners can quickly discover all releases for a package they maintain.
 - **Sigstore**: Users can efficiently retrieve all signatures or provenance records associated with a specific software artifact or developer identity.
 
+> [!NOTE]  
+> For a deeper dive into ecosystem-specific architectures and post-quantum benefits, see [Verifiable Index Applications](./APPLICATIONS.md).
+
 While traditional indices exist for these ecosystems today, they rely on centralized trust and are not verifiable.
 
 ## High-Level Implementation Details
