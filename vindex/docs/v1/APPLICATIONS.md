@@ -23,11 +23,27 @@ A VIndex can be deployed over a CT log to provide verifiable lookups:
 4. **Revocation Monitoring**: Because the VIndex provides an append-only history of all certificates issued for the domain, monitors are responsible for parsing the returned certificates/precertificates to determine their expiration or revocation status.
 
 ### Post-Quantum & Merkle Tree Certificates (MTCs)
-While [Merkle Tree Certificates (MTCs)](https://datatracker.ietf.org/doc/draft-ietf-plants-merkle-tree-certs/) elegantly solve the problem of bloated signature chains during TLS handshakes, the transition to Post-Quantum (PQ) cryptography shifts that data burden entirely onto the transparency logs. VIndex serves as the crucial missing layer to keep the MTC ecosystem viable for independent monitors:
 
-* **Sustaining Decentralized Monitoring**: Post-Quantum algorithms (like ML-DSA) produce larger keys and signatures. Combined with shorter certificate lifespans, transparency logs will grow at an unprecedented rate. Without a verifiable index, downloading full logs will become computationally and financially prohibitive, effectively killing independent domain monitoring.
-* **Targeted, Trustless Verification**: VIndex decouples the lookup layer from the primary log, reducing a monitor's bandwidth requirement from the entire global certificate volume down to the specific delta of their own domain. This democratization ensures any domain owner can independently and verifiably monitor their assets on low-resource hardware.
-* **Zero-Risk Integration**: Designed as an independent overlay, VIndex does not interfere with the critical path of MTC log admission or issuance. Furthermore, because the Output Log leverages the exact same static `tlog-tiles` format as modern log layers, verifiers can reuse their existing fetching and verification tooling.
+#### 1. MTC vs. Traditional CT Logs
+[Merkle Tree Certificates (MTCs)](https://datatracker.ietf.org/doc/draft-ietf-plants-merkle-tree-certs/) are designed to minimize certificate sizes by omitting public keys and signatures from log entries, storing only hashes of the public keys and using a single signature over the tree head. This makes MTC logs significantly smaller than traditional CT logs (like RFC6962 or `static-ct`), even when accounting for larger Post-Quantum keys.
+
+Importantly, **Subject Alternative Names (SANs) remain fully present** in the MTC leaf structure. This is the essential ingredient that allows VIndex to parse the log and map domain names to their corresponding leaf indices. Combined with log pruning and the fact that MTCs are logged exclusively in their issuer's log, independent monitoring of MTC logs is inherently more efficient than traditional CT. However, downloading and processing all active certificates across multiple logs remains a high barrier for individual domain owners, making VIndex a crucial complementary layer.
+
+#### 2. Deployment Models
+A VIndex can be integrated into the MTC ecosystem using one of two primary deployment models:
+
+##### 2a. Integrated CA-Operated Index
+* **Model**: The Certificate Authority (CA) runs both the primary MTC log and the VIndex as a unified offering.
+* **Trade-offs**: Because MTC logs actively prune expired certificates, older VIndex pointers may reference leaves that have been dropped from the primary log. In practice, this is rarely an issue: regular monitors tail the VIndex frequently enough to fetch new entries before they expire, and new monitors typically focus on currently active certificates. In the rare event that a full historical audit is required, unpruned data can still be retrieved from an external mirror using the same leaf indices.
+
+##### 2b. Mirror-Operated Index
+* **Model**: Independent mirrors maintain a full, unpruned history of the MTC log and operate the VIndex alongside it.
+* **Trade-offs**: This guarantees that all VIndex pointers resolve to valid, downloadable certificate data. However, funding and maintaining this infrastructure remains an open question.
+
+##### Incentives & Game Theory
+Choosing between these models involves shifting the ecosystem's operational incentives. Traditional CT relies heavily on third-party log operators providing a public good. MTC intentionally shifts the primary log operational burden to the CAs themselves.
+
+Integrating the VIndex directly into the CA's log infrastructure (Model 2a) presents a unique opportunity to bundle the costs of verifiable logging and targeted monitoring into a single package, dramatically improving usability for independent monitors without relying on third parties. While the CT community will ultimately determine the preferred path, VIndex is fully compatible with either approach and requires no modifications to the underlying MTC log format, serving as a natural and purely complementary addition.
 
 ---
 
