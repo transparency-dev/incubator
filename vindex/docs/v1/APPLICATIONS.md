@@ -8,7 +8,7 @@ In the context of Certificate Transparency, the Verifiable Index (VIndex) addres
 
 ### The Problem
 A domain owner wants to know every certificate issued for their domain to detect unauthorized issuance. Today, they must either:
-1. Process the entire massive CT log themselves.
+1. Download, and process all massive CT logs themselves; OR
 2. Trust a centralized third-party search tool (like `crt.sh`), which could theoretically omit results due to error or malice.
 
 ### The Solution
@@ -44,6 +44,12 @@ A VIndex can be integrated into the MTC ecosystem using one of two primary deplo
 Choosing between these models involves shifting the ecosystem's operational incentives. Traditional CT relies heavily on third-party log operators providing a public good. MTC intentionally shifts the primary log operational burden to the CAs themselves.
 
 Integrating the VIndex directly into the CA's log infrastructure (Model 2a) presents a unique opportunity to bundle the costs of verifiable logging and targeted monitoring into a single package, dramatically improving usability for independent monitors without relying on third parties. While the CT community will ultimately determine the preferred path, VIndex is fully compatible with either approach and requires no modifications to the underlying MTC log format, serving as a natural and purely complementary addition.
+
+#### 3. Open Questions
+* **Deployment Path**: Which deployment model (CA-integrated vs. Mirror-operated) will be widely adopted by the ecosystem?
+* **VIndex Lifecycle & Size Management**: If primary logs grow infinitely but prune older certificates, how should an unbounded VIndex be managed?
+  * Should the VIndex be periodically rolled over (creating temporal epochs)?
+  * Can individual sub-logs within the VIndex be safely pruned over time to reclaim storage?
 
 ---
 
