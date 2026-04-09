@@ -29,27 +29,29 @@ A VIndex can be deployed over a CT log to provide verifiable lookups:
 
 Importantly, **Subject Alternative Names (SANs) remain fully present** in the MTC leaf structure. This is the essential ingredient that allows VIndex to parse the log and map domain names to their corresponding leaf indices. Combined with log pruning and the fact that MTCs are logged exclusively in their issuer's log, independent monitoring of MTC logs is inherently more efficient than traditional CT. However, downloading and processing all active certificates across multiple logs remains a high barrier for individual domain owners, making VIndex a crucial complementary layer.
 
-#### 2. Deployment Models
-A VIndex can be integrated into the MTC ecosystem using one of two primary deployment models:
+#### 2. Deployment Models & Pruning Realities
+
+A VIndex can be integrated into the MTC ecosystem across different operational models. However, unlike traditional CT where logs grow infinitely, MTC ecosystems heavily utilize pruning to maintain sustainability. This pruning can apply to the primary log, mirrors, and even the VIndex itself.
 
 ##### 2a. Integrated CA-Operated Index
 * **Model**: The Certificate Authority (CA) runs both the primary MTC log and the VIndex as a unified offering.
-* **Trade-offs**: Because MTC logs actively prune expired certificates, older VIndex pointers may reference leaves that have been dropped from the primary log. In practice, this is rarely an issue: regular monitors tail the VIndex frequently enough to fetch new entries before they expire, and new monitors typically focus on currently active certificates. In the rare event that a full historical audit is required, unpruned data can still be retrieved from an external mirror using the same leaf indices.
+* **Trade-offs**: Because MTC logs actively prune expired certificates, older VIndex pointers will eventually reference leaves that have been dropped from the primary log. If the VIndex itself is also managed via pruning or temporal epochs, these historical records may disappear entirely.
 
 ##### 2b. Mirror-Operated Index
-* **Model**: Independent mirrors maintain a full, unpruned history of the MTC log and operate the VIndex alongside it.
-* **Trade-offs**: This guarantees that all VIndex pointers resolve to valid, downloadable certificate data. However, funding and maintaining this infrastructure remains an open question.
+* **Model**: Independent mirrors operate the VIndex alongside a copy of the MTC log. These mirrors may choose to maintain a full, unpruned history, or they may adopt the same pruning policy as the source log to reduce operational costs.
+* **Trade-offs**: While an unpruned mirror is ideal for long-term historical forensics, funding and maintaining such storage is a significant barrier. If a mirror adopts standard pruning, older data becomes unavailable just as it does in the primary log.
 
-##### Incentives & Game Theory
-Choosing between these models involves shifting the ecosystem's operational incentives. Traditional CT relies heavily on third-party log operators providing a public good. MTC intentionally shifts the primary log operational burden to the CAs themselves.
+##### The Value of Active Monitoring
 
-Integrating the VIndex directly into the CA's log infrastructure (Model 2a) presents a unique opportunity to bundle the costs of verifiable logging and targeted monitoring into a single package, dramatically improving usability for independent monitors without relying on third parties. While the CT community will ultimately determine the preferred path, VIndex is fully compatible with either approach and requires no modifications to the underlying MTC log format, serving as a natural and purely complementary addition.
+Regardless of whether the underlying data is eventually pruned from all logs, mirrors, and the index, the VIndex retains its core value: **efficient real-time threat detection**. 
+
+The primary mission of a domain monitor is to detect unauthorized certificates *while they are active* so that mitigation (revocation) can occur. The VIndex reduces the cost of discovering these active certificates to a simple targeted query, removing the need for domain owners to download massive datasets. While a full, unpruned mirror provides the best capability for retrospective auditing, the VIndex remains a crucial operational layer even in a fully pruned ecosystem.
 
 #### 3. Open Questions
 * **Deployment Path**: Which deployment model (CA-integrated vs. Mirror-operated) will be widely adopted by the ecosystem?
 * **VIndex Lifecycle & Size Management**: If primary logs grow infinitely but prune older certificates, how should an unbounded VIndex be managed?
   * Should the VIndex be periodically rolled over (creating temporal epochs)?
-  * Can individual sub-logs within the VIndex be safely pruned over time to reclaim storage?
+  * Can individual sub-logs within the VIndex be safely pruned over time to reclaim storage? (See [VIndex Pruning & Storage Reclamation](./README.md#vindex-pruning--storage-reclamation))
 
 ---
 
