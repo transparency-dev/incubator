@@ -26,6 +26,9 @@ This verifiable map can be applied to any existing log where users need to enume
 - **Go Software Supply Chain (SumDB)**: Package owners can quickly discover all releases for a package they maintain.
 - **Sigstore**: Users can efficiently retrieve all signatures or provenance records associated with a specific software artifact or developer identity.
 
+> [!NOTE]  
+> For a deeper dive into ecosystem-specific architectures and post-quantum benefits, see [Verifiable Index Applications](./APPLICATIONS.md).
+
 While traditional indices exist for these ecosystems today, they rely on centralized trust and are not verifiable.
 
 ## High-Level Implementation Details
@@ -69,13 +72,27 @@ For those familiar with Key Transparency (KT), Merkle Tree Certs (MTC), or other
 1. **Decoupling Data from the Index**: Unlike typical Key Transparency systems where the Verifiable Map serves as the primary database (or a Sparse Merkle Tree tightly integrates the log and map), the VIndex acts entirely as a secondary *overlay*. The pre-existing Input Log remains the absolute source of truth. If the VIndex is corrupted or goes offline, the underlying transparency log's security model remains completely unaffected.
 2. **The Output Log Format**: The Output Log is not a heavyweight, database-backed transparency log (like Trillian). In v1, it is implemented using [Tessera](https://github.com/transparency-dev/tessera)'s POSIX log ([`tlog-tiles`](https://c2sp.org/tlog-tiles)). This writes static, cacheable Merkle tree tiles directly to a dumb filesystem or blob storage (like S3). This lightweight approach strictly protects against split-view (equivocation) attacks, mathematically forcing the Map Operator to commit to one verifiable timeline. Crucially, because the Output Log uses the exact same `tlog-tiles` format as many Input Logs, clients and verifiers can leverage their existing transparency verification libraries for both layers.
 
+## Design Considerations & Open Questions
+
+### VIndex Pruning & Storage Reclamation
+
+As ecosystems like [Merkle Tree Certificates (MTC)](./APPLICATIONS.md) adopt aggressive log pruning to maintain storage sustainability, the VIndex must support mechanisms to discard historical pointers that no longer resolve to available data.
+
+A promising approach is **Prefix Pruning via Compact Ranges**:
+- **The Operation**: The VIndex Operator runs an operation declaring that all entries below a given Input Log index `N` are no longer available.
+- **KV Storage Impact**: The VIndex drops all leaf pointers with indices `< N` from its bulk Key-Value store.
+- **Cryptographic Integrity**: To maintain the ability to prove inclusion for the remaining pointers (`>= N`), the VIndex retains the minimal set of internal Merkle tree node hashes (a `CompactRange`) representing the deleted prefix for each affected sub-log.
+
+#### Key Nuances and Limitations:
+1. **Unbounded MPT Growth**: While this reclaims bulk storage in the KV layer, the cryptographic Prefix Trie (MPT) must continue to store the 32-byte root hash for every key ever observed (to prove the state of the pruned sub-logs). Therefore, the number of keys in the MPT is monotonically increasing.
+2. **Lagging Clients**: If a client's last known state is older than the pruning threshold `N`, the server cannot provide a standard incremental update. The protocol must support a specific mechanism for clients to safely resynchronize from the pruned head.
+
 ## Limitations & Out of Scope (v1)
 
 While the VIndex architecture cleanly solves the read-efficiency problem for transparency logs, there are several database-like features that are explicitly out of scope for v1:
 
 - **MapFn Upgradability**: The `MapFn` (e.g., the WASM parser) is strongly immutable for the life of the index. If the mapping logic needs to change (e.g., to index a new metadata field), the operator cannot dynamically "upgrade" the function. Instead, they must deploy an entirely new VIndex (processing the Input Log from index 0) and coordinate rolling clients over to the new version.
 - **No Custom ReduceFn**: The VIndex creates an append-only log of all matching Input Log indices for a given search key. It does not support a user-defined `ReduceFn` to pre-aggregate or filter these results (e.g. to only return the single latest version of a module). Any reduction or filtering logic must be implemented by the client that consumes entries from the VIndex.
-- **Record Deletion & Value Overwriting**: The VIndex is an append-only map of logs. It does not support overwriting or deleting mapped pointers. If an entry in the Input Log is revoked or superseded, the VIndex will still point to it. It is up to the client validating the records to recognize revocation events within the data payload.
 - **Admission Validation**: The VIndex is designed to be a "dumb" indexer that strictly inherits the admission criteria of the Input Log (e.g., a CT log requiring trusted root signatures). It will not run heavyweight cryptographic validation to filter out spam. Therefore, the onus is entirely on the **author** of the `MapFn` to design their parser defensively—only outputting keys for rigidly expected data structures—to minimize spam and hot-key vectors, especially when indexing open-admission logs.
 
 ## Relationship to Incubator MVP
