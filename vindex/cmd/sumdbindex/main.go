@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/signal"
@@ -182,7 +181,7 @@ func maintainMap(ctx context.Context, vi *vindex.VerifiableIndex) {
 	}
 }
 
-func runWebServer(inLog *httputil.ReverseProxy, vi *vindex.VerifiableIndex, outLogDir string) error {
+func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir string) error {
 	web := NewServer(vi.Lookup)
 
 	olfs := http.FileServer(http.Dir(outLogDir))

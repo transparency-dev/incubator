@@ -1,15 +1,26 @@
-## SumDB to tlog-tiles proxy
+# SumDB to tlog-tiles proxy
 
 This is a proxy that serves the [Go SumDB](https://sum.golang.org/) with a [tlog-tiles](https://c2sp.org/tlog-tiles) API.
 This allows tooling written for the tlog-tiles API to be used with the SumDB, even though its API is slightly different.
 
-### Running
+## Running
+
+### Basic Usage
 
 ```shell
 go run ./sumdb/cmd/proxy.go --listen=":8089"
 ```
 
-### Using
+### Advanced Usage
+
+```shell
+go run ./sumdb/cmd/proxy.go --witnesses 2 --index ./webpecker/index.html
+```
+
+This runs a version with a Web UI that also fetches witnesses confirming the log has evolved consistently.
+To see the web UI, simply open http://localhost:8089/.
+
+## Using
 
 Any valid tlog-tiles API paths sent to the listen address will be routed to the SumDB proxy.
 Paths will be changed as necessary, and leaf data returned will be rewritten to comply with the tlog-tiles spec.

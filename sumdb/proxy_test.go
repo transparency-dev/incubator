@@ -65,7 +65,7 @@ func TestRewrite(t *testing.T) {
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			proxy := NewProxy(ProxyOpts{PathPrefix: tC.pathPrefix})
+			proxy := newReverseProxy(ProxyOpts{PathPrefix: tC.pathPrefix})
 			req := &httputil.ProxyRequest{
 				In: &http.Request{
 					URL: mustParseURL(t, fmt.Sprintf("http://example.com%s", tC.inPath)),
@@ -110,7 +110,7 @@ func TestModifyResponse(t *testing.T) {
 	}
 	for _, tC := range testCases {
 		t.Run(tC.desc, func(t *testing.T) {
-			proxy := NewProxy(ProxyOpts{})
+			proxy := newReverseProxy(ProxyOpts{})
 			resp := &http.Response{
 				Request: &http.Request{
 					URL: mustParseURL(t, fmt.Sprintf("http://example.com%s", tC.path)),

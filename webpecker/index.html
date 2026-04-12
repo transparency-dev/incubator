@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Webpecker | Inspectable Log Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'Fira Code', monospace; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        
+        @keyframes pulse-soft { 
+            0%, 100% { opacity: 1; } 
+            50% { opacity: 0.5; } 
+        }
+        .animate-pulse-soft { animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+        @keyframes highlight-fade {
+            0% { background-color: rgba(234, 88, 12, 0.2); border-color: #ea580c; }
+            100% { background-color: #0f172a; border-color: #1e293b; }
+        }
+        .jump-highlight {
+            animation: highlight-fade 2s ease-out forwards;
+        }
+        
+        #sidebar { transition: transform 0.3s ease-in-out; }
+        @media (max-width: 768px) {
+            #sidebar.hidden-mobile { transform: translateX(-100%); }
+            #sidebar.visible-mobile { transform: translateX(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 bg-slate-900/50 backdrop-blur-md z-30">
+        <div class="flex items-center gap-3">
+            <button onclick="app.toggleSidebar()" class="md:hidden p-2 hover:bg-slate-800 rounded-lg text-slate-400">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <div class="flex items-center gap-2">
+                <div class="w-9 h-9 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg shadow-orange-900/20">
+                    <svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m3 21 1.9-1.9a4.4 4.4 0 1 1 6.2-6.2l1.9-1.9"></path>
+                        <path d="M14.5 4a5.9 5.9 0 0 0-4.5 10.3"></path>
+                        <path d="M14.5 4c2.2 0 4.1 1.2 5.1 3"></path>
+                        <path d="m11 8 3 3"></path>
+                    </svg>
+                </div>
+                <div class="leading-tight">
+                    <h1 class="text-lg font-black tracking-tighter text-white uppercase">Webpecker</h1>
+                    <p class="text-[9px] text-orange-500 font-bold tracking-widest uppercase">Binary Log Viewer</p>
+                </div>
+            </div>
+        </div>
+        <div id="connection-status" class="flex items-center gap-2 text-xs font-medium px-3 py-1 rounded-full bg-slate-800 border border-slate-700">
+            <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+            <span class="text-slate-400 text-[10px] uppercase tracking-wider">Origin Sync</span>
+        </div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden relative">
+        <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-80 border-r border-slate-800 bg-slate-900 md:relative md:translate-x-0 hidden-mobile flex flex-col custom-scrollbar overflow-y-auto">
+            <div class="p-6 space-y-6">
+
+                <!-- Checkpoint Section -->
+                <section>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-3">Root of Trust</label>
+                    <div class="bg-black/40 rounded-xl border border-slate-800 overflow-hidden">
+                        <div class="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between">
+                            <h3 class="text-sm font-semibold">Checkpoint</h3>
+                            <span id="sync-time" class="text-[9px] text-slate-500 font-mono">--:--:--</span>
+                        </div>
+                        <div id="checkpoint-raw" class="p-4 mono text-[10px] text-orange-400 break-all bg-black/60 leading-tight min-h-[60px] whitespace-pre-wrap">--</div>
+                        <div class="p-4 bg-slate-900/50 space-y-3">
+                            <div class="flex justify-between items-center text-[11px]">
+                                <span class="text-slate-500">Tree Size</span>
+                                <span id="tree-size" class="font-bold text-white">--</span>
+                            </div>
+                            <div id="signatures-list" class="space-y-1.5 pt-2 border-t border-slate-800"></div>
+                            <button onclick="app.refresh()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold border border-slate-700 transition-all">Refresh</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <label class="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-2">Debug Log</label>
+                    <div id="debug-log" class="p-3 bg-black rounded-lg mono text-[9px] text-slate-400 h-48 overflow-y-auto border border-slate-800 leading-normal">
+                        > Webpecker initialized.
+                    </div>
+                </section>
+            </div>
+        </aside>
+
+        <section class="flex-1 flex flex-col bg-slate-950 w-full min-w-0">
+            <div class="p-4 md:p-6 border-b border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between bg-slate-900/20 gap-4">
+                <div>
+                    <h2 class="text-lg font-bold">Log Entries</h2>
+                    <p id="entries-subtitle" class="text-xs text-slate-500">Binary Stream Viewer</p>
+                </div>
+                <input id="search-input" type="number" placeholder="Jump to index..." class="w-full sm:w-48 bg-slate-900 border border-slate-700 rounded-lg px-4 py-2 text-sm focus:ring-1 focus:ring-orange-500 outline-none transition-all">
+            </div>
+
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6 scroll-smooth">
+                <div id="entries-container" class="space-y-2">
+                    <div class="flex flex-col items-center justify-center h-64 text-slate-500">
+                        <svg class="w-8 h-8 animate-spin mb-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span>Waiting for local log...</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Signature Overlay -->
+    <div id="sig-overlay" class="hidden fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-bold">Signature Inspector</h3>
+                </div>
+                <button onclick="app.closeSigDetail()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                <div>
+                    <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">Identity</span>
+                    <div id="sig-identity" class="text-xl font-bold mono text-orange-500">--</div>
+                </div>
+                <div>
+                    <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">Signature</span>
+                    <div id="sig-data" class="p-5 bg-slate-950 rounded-xl text-[12px] mono break-all text-slate-300 border border-slate-800 leading-relaxed shadow-inner overflow-x-auto whitespace-pre-wrap">--</div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex justify-end">
+                <button onclick="app.closeSigDetail()" class="px-8 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-orange-900/20 transition-all">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Detail Overlay -->
+    <div id="detail-overlay" class="hidden fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-bold">Entry Inspector</h3>
+                    <div id="inspector-mode" class="text-[10px] font-bold bg-orange-600/20 text-orange-400 px-2 py-0.5 rounded border border-orange-500/20 uppercase tracking-wider">INTERPRETED</div>
+                </div>
+                <button onclick="app.closeDetail()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">Index</span>
+                        <div id="detail-index" class="text-xl font-bold mono text-orange-500">--</div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">Framing</span>
+                        <div class="text-emerald-400 font-bold text-sm flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Valid LVP Payload
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Tabbed View: Interpreted vs Hex -->
+                <div class="space-y-4">
+                    <div class="flex border-b border-slate-800 gap-6">
+                        <button onclick="app.setInspectorTab('interpreted')" id="tab-interpreted" class="pb-2 text-xs font-bold border-b-2 border-orange-500 text-white">INTERPRETED</button>
+                        <button onclick="app.setInspectorTab('hex')" id="tab-hex" class="pb-2 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-300">RAW HEX</button>
+                    </div>
+
+                    <div id="view-interpreted">
+                        <div id="detail-data" class="p-5 bg-slate-950 rounded-xl text-[12px] mono break-all text-slate-300 border border-slate-800 leading-relaxed shadow-inner overflow-x-auto whitespace-pre-wrap">--</div>
+                    </div>
+                    
+                    <div id="view-hex" class="hidden">
+                        <div id="detail-hex" class="p-5 bg-black rounded-xl text-[10px] mono break-all text-orange-500/70 border border-slate-800 leading-tight">--</div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex justify-between items-center">
+                <div class="text-[10px] text-slate-500 font-mono">Payload: <span id="detail-offset">0</span> bytes</div>
+                <button onclick="app.closeDetail()" class="px-8 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-orange-900/20 transition-all">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /*******************************************************************************
+         * 🛠 USER_LOG_CUSTOMIZATION
+         * Edit this object to tune Webpecker for your specific log's leaf data.
+         ******************************************************************************/
+        const LOG_CUSTOMIZER = {
+            /**
+             * renderLogEntry
+             * @param {Uint8Array} bytes - The raw binary payload for a single log entry.
+             * @returns {String} - A text representation of the data (can be JSON, text, etc.)
+             */
+            renderLogEntry: function(bytes) {
+                const decoder = new TextDecoder('utf-8');
+                try {
+                    const text = decoder.decode(bytes);
+                    if (text.trim().startsWith('{')) {
+                        try {
+                            return JSON.stringify(JSON.parse(text), null, 2);
+                        } catch(e) { return text; }
+                    }
+                    return text || "[Binary Content]";
+                } catch (e) {
+                    return "[Unable to decode as UTF-8]";
+                }
+            }
+        };
+
+        const app = {
+            config: {
+                tileSize: 256,
+                checkpointPath: './checkpoint',
+                tilePath: './tile/entries/'
+            },
+            state: {
+                treeSize: 0,
+                sidebarOpen: false,
+                currentEntryBytes: null
+            },
+
+            init() {
+                this.refresh();
+                this.setupListeners();
+            },
+
+            log(msg, isError = false) {
+                const consoleEl = document.getElementById('debug-log');
+                if (!consoleEl) return;
+                const line = document.createElement('div');
+                line.className = isError ? 'text-red-400 font-bold' : 'text-slate-400';
+                line.textContent = `[${new Date().toLocaleTimeString([], {hour12:false})}] ${msg}`;
+                consoleEl.appendChild(line);
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            },
+
+            toggleSidebar() {
+                this.state.sidebarOpen = !this.state.sidebarOpen;
+                document.getElementById('sidebar').classList.toggle('hidden-mobile', !this.state.sidebarOpen);
+                document.getElementById('sidebar').classList.toggle('visible-mobile', this.state.sidebarOpen);
+                document.getElementById('sidebar-overlay').classList.toggle('hidden', !this.state.sidebarOpen);
+            },
+
+            async refresh() {
+                this.updateStatus('fetching', 'Pecking...');
+                try {
+                    const response = await fetch(this.config.checkpointPath);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const text = await response.text();
+                    this.parseCheckpoint(text);
+                    this.updateStatus('success', 'Synchronized');
+                    const lastTileIndex = Math.floor((this.state.treeSize - 1) / this.config.tileSize);
+                    if (lastTileIndex >= 0) this.fetchTile(lastTileIndex);
+                } catch (e) {
+                    this.log(`Sync Failed: ${e.message}`, true);
+                    this.updateStatus('error', 'Log Error');
+                    this.renderErrorState(e.message);
+                }
+                document.getElementById('sync-time').textContent = new Date().toLocaleTimeString([], {hour12:false});
+            },
+
+            parseCheckpoint(text) {
+                const lines = text.trim().split('\n');
+                if (lines.length >= 2) {
+                    this.state.treeSize = parseInt(lines[1], 10);
+                    document.getElementById('tree-size').textContent = this.state.treeSize.toLocaleString();
+                    document.getElementById('checkpoint-raw').textContent = text;
+                    this.renderSignatures(lines.slice(3).filter(l => l.trim().length > 0));
+                }
+            },
+
+            renderSignatures(sigs) {
+                const list = document.getElementById('signatures-list');
+                list.innerHTML = '';
+                sigs.forEach(sig => {
+                    const div = document.createElement('div');
+                    div.className = "flex items-center justify-between bg-slate-950/40 p-2 rounded border border-slate-800 text-[9px] group hover:border-orange-500/30 transition-colors cursor-pointer";
+                    const identity = sig.startsWith('— ') ? sig.substring(2).split(' ')[0] : "Witness";
+                    div.innerHTML = `<span class="font-bold text-slate-500 group-hover:text-orange-400 capitalize">${identity}</span><span class="mono text-slate-600">${sig.slice(-12)}...</span>`;
+                    div.onclick = () => this.showSignatureDetail(identity, sig);
+                    list.appendChild(div);
+                });
+            },
+
+            formatTileIndex(n) {
+                let s = n.toString();
+                while (s.length < 3) s = '0' + s;
+                const chunks = [];
+                for (let i = s.length; i > 0; i -= 3) {
+                    let chunk = s.substring(Math.max(0, i - 3), i);
+                    while (chunk.length < 3) chunk = '0' + chunk;
+                    chunks.unshift(chunk);
+                }
+                for (let i = 0; i < chunks.length - 1; i++) {
+                    chunks[i] = 'x' + chunks[i];
+                }
+                return chunks.join('/');
+            },
+
+            async fetchTile(idx, targetIndex = null) {
+                const encodedPath = this.formatTileIndex(idx);
+                let url = `${this.config.tilePath}${encodedPath}`;
+                
+                const isFullTile = (idx + 1) * this.config.tileSize <= this.state.treeSize;
+                if (!isFullTile) {
+                    const leavesCount = this.state.treeSize % this.config.tileSize;
+                    url = `${url}.p/${leavesCount}`;
+                    this.log(`Pecking partial tile: ${url}`);
+                } else {
+                    this.log(`Fetching full LVP tile: ${url}`);
+                }
+
+                try {
+                    const res = await fetch(url);
+                    if (!res.ok) throw new Error(`Tile ${idx} not found at ${url}`);
+                    const buffer = await res.arrayBuffer();
+                    
+                    this.log(`Received buffer: ${buffer.byteLength} bytes`);
+                    if (buffer.byteLength === 0) {
+                        this.log(`Warning: Received empty buffer for tile ${idx}`, true);
+                    }
+
+                    const entries = this.parseLVP(new Uint8Array(buffer));
+                    this.log(`Parsed ${entries.length} entries from uint16 stream`);
+                    
+                    this.renderEntries(entries, idx, targetIndex);
+                } catch (e) {
+                    this.log(`Tile loading error: ${e.message}`, true);
+                }
+            },
+
+            parseLVP(uint8Array) {
+                const records = [];
+                let pointer = 0;
+                const dataView = new DataView(uint8Array.buffer, uint8Array.byteOffset, uint8Array.byteLength);
+
+                while (pointer + 2 <= uint8Array.length) {
+                    try {
+                        const length = dataView.getUint16(pointer, false); 
+                        const start = pointer + 2;
+                        
+                        if (start + length > uint8Array.length) {
+                            this.log(`LVP Truncation: Expected ${length} bytes, but only ${uint8Array.length - start} remain.`, true);
+                            break;
+                        }
+
+                        records.push(uint8Array.slice(start, start + length));
+                        pointer = start + length;
+                    } catch (e) {
+                        this.log(`LVP Critical Error at offset ${pointer}: ${e.message}`, true);
+                        break;
+                    }
+                }
+                
+                if (pointer < uint8Array.length && uint8Array.length - pointer > 0) {
+                    this.log(`Trailing data: ${uint8Array.length - pointer} bytes remain unparsed.`);
+                }
+                
+                return records;
+            },
+
+            renderEntries(records, tileIdx, targetIndex = null) {
+                const container = document.getElementById('entries-container');
+                container.innerHTML = '';
+                
+                document.getElementById('entries-subtitle').textContent = `Binary Stream Viewer | Tile #${tileIdx}`;
+                
+                if (records.length === 0) {
+                    container.innerHTML = `
+                        <div class="flex flex-col items-center justify-center h-48 text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                            <span class="text-sm">Tile fetched but no entries parsed. Check framing.</span>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let targetElement = null;
+                let targetRecord = null;
+
+                [...records].reverse().forEach((record, i) => {
+                    const globalIdx = (tileIdx * this.config.tileSize) + (records.length - 1 - i);
+                    if (globalIdx >= this.state.treeSize) return;
+
+                    const div = document.createElement('div');
+                    div.id = `entry-${globalIdx}`;
+                    div.className = "group flex items-center justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-orange-500/50 cursor-pointer transition-all shadow-sm";
+                    
+                    const interpreted = LOG_CUSTOMIZER.renderLogEntry(record);
+                    
+                    div.onclick = () => this.showDetail(globalIdx, record);
+                    
+                    if (globalIdx === targetIndex) {
+                        div.classList.add('jump-highlight');
+                        targetElement = div;
+                        targetRecord = record;
+                    }
+
+                    div.innerHTML = `
+                        <div class="flex items-center gap-4 overflow-hidden">
+                            <span class="mono text-[10px] text-slate-600 w-12 text-right">#${globalIdx}</span>
+                            <div class="h-8 w-[1px] bg-slate-800"></div>
+                            <div class="overflow-hidden">
+                                <p class="text-xs font-medium text-slate-300 truncate">${interpreted.substring(0, 100)}</p>
+                                <p class="text-[9px] text-slate-600 mt-0.5">${record.byteLength} bytes</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-slate-700 group-hover:text-orange-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                });
+
+                // Post-render jump actions
+                if (targetElement) {
+                    setTimeout(() => {
+                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        this.showDetail(targetIndex, targetRecord);
+                    }, 100);
+                }
+            },
+
+            showDetail(idx, buffer) {
+                this.state.currentEntryBytes = buffer;
+                this.setInspectorTab('interpreted');
+                document.getElementById('detail-index').textContent = `#${idx}`;
+                document.getElementById('detail-data').textContent = LOG_CUSTOMIZER.renderLogEntry(buffer);
+                const hex = Array.from(buffer).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                document.getElementById('detail-hex').textContent = hex;
+                document.getElementById('detail-offset').textContent = buffer.byteLength;
+                document.getElementById('detail-overlay').classList.remove('hidden');
+            },
+            
+            showSignatureDetail(identity, sig) {
+                document.getElementById('sig-identity').textContent = identity;
+                document.getElementById('sig-data').textContent = sig;
+                document.getElementById('sig-overlay').classList.remove('hidden');
+            },
+
+            setInspectorTab(tab) {
+                const interView = document.getElementById('view-interpreted');
+                const hexView = document.getElementById('view-hex');
+                const interTab = document.getElementById('tab-interpreted');
+                const hexTab = document.getElementById('tab-hex');
+
+                if (tab === 'hex') {
+                    interView.classList.add('hidden');
+                    hexView.classList.remove('hidden');
+                    hexTab.className = "pb-2 text-xs font-bold border-b-2 border-orange-500 text-white";
+                    interTab.className = "pb-2 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-300";
+                } else {
+                    hexView.classList.add('hidden');
+                    interView.classList.remove('hidden');
+                    interTab.className = "pb-2 text-xs font-bold border-b-2 border-orange-500 text-white";
+                    hexTab.className = "pb-2 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-300";
+                }
+            },
+
+            closeDetail() { document.getElementById('detail-overlay').classList.add('hidden'); },
+
+            closeSigDetail() { document.getElementById('sig-overlay').classList.add('hidden'); },
+
+            updateStatus(type, msg) {
+                const el = document.getElementById('connection-status');
+                const dot = el.querySelector('span');
+                const text = el.querySelectorAll('span')[1];
+                text.textContent = msg;
+                dot.className = "w-2 h-2 rounded-full " + (type === 'success' ? 'bg-emerald-500' : type === 'fetching' ? 'bg-orange-500 animate-pulse' : 'bg-red-500');
+            },
+
+            renderErrorState(message) {
+                document.getElementById('entries-container').innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-20 text-center px-6">
+                        <div class="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
+                            <svg class="w-6 h-6 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        </div>
+                        <h3 class="text-red-400 font-bold mb-1">Local Origin Missing</h3>
+                        <p class="text-slate-500 text-xs max-w-xs">${message}. Deploy on log domain.</p>
+                        <button onclick="app.refresh()" class="mt-6 px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-bold border border-slate-700">Retry peck</button>
+                    </div>
+                `;
+            },
+
+            setupListeners() {
+                document.getElementById('search-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        const val = parseInt(e.target.value);
+                        if (!isNaN(val)) {
+                            const tileIdx = Math.floor(val / this.config.tileSize);
+                            this.fetchTile(tileIdx, val);
+                        }
+                    }
+                });
+            }
+        };
+
+        window.onload = () => app.init();
+    </script>
+</body>
+</html>
