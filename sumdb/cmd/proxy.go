@@ -28,6 +28,7 @@ import (
 var (
 	listen      = flag.String("listen", ":8089", "Address to set up HTTP server listening on")
 	witnessSigs = flag.Uint("witnesses", 0, "Number of witness signatures required on a checkpoint. Setting this will pull checkpoints from the transparency-dev prod distributor.")
+	indexFile   = flag.String("index", "", "Local path to an index.html file to serve at the log root /index.html")
 )
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 
 	proxy := sumdb.NewProxy(sumdb.ProxyOpts{
 		WitnessSigs: *witnessSigs,
+		IndexFile:   *indexFile,
 	})
 	klog.Infof("tlog-tiles API listening on %s", *listen)
 	if err := http.ListenAndServe(*listen, proxy); err != nil {
