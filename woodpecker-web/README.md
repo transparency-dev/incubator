@@ -9,7 +9,7 @@ Woodpecker Web is based on [Woodpecker](https://github.com/mhutchinson/woodpecke
 
 Note that this version of Woodpecker Web is designed to view a single log.
 
-> [!WARNING] Verification
+> [!WARNING]
 > This does not perform any verification, it simply shows the contents of the log.
 > This viewer is for convenience only, and should NOT be used in a load-bearing manner.
 > Verification can be added in the future, but this only has benefit if the HTML file is verified.
