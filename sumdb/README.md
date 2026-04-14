@@ -14,7 +14,7 @@ go run ./sumdb/cmd/proxy.go --listen=":8089"
 ### Advanced Usage
 
 ```shell
-go run ./sumdb/cmd/proxy.go --witnesses 2 --index ./webpecker/index.html
+go run ./sumdb/cmd/proxy.go --witnesses 2 --index ./woodpecker-web/index.html
 ```
 
 This runs a version with a Web UI that also fetches witnesses confirming the log has evolved consistently.
