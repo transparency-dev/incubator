@@ -9,6 +9,11 @@ Woodpecker Web is based on [Woodpecker](https://github.com/mhutchinson/woodpecke
 
 Note that this version of Woodpecker Web is designed to view a single log.
 
+> [!WARNING] Verification
+> This does not perform any verification, it simply shows the contents of the log.
+> This viewer is for convenience only, and should NOT be used in a load-bearing manner.
+> Verification can be added in the future, but this only has benefit if the HTML file is verified.
+
 ## How it Works
 Woodpecker Web fetches the `./checkpoint` file to learn the current size of the log. It then fetches data tiles from the `./tile/entries/...` directory structure. This implementation follows the [tlog-tiles specification](https://c2sp.org/tlog-tiles), which is key to understanding how this tool operates and how the log data is structured.
 
