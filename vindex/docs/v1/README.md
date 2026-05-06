@@ -78,12 +78,12 @@ Adding a Verifiable Index to a transparency deployment introduces a distinct pro
 ### Compute
 
 - **Parsing Overhead**: The indexing process is relatively compute-intensive per leaf. Each entry must be fetched, cryptographically verified against the Input Log checkpoint, and parsed via the WebAssembly sandbox to extract mapping keys.
-- **Isolation**: This compute load is decoupled from the primary log's write path. The polling ingestion loop can be batched and pipelined asynchronously, ensuring that index processing does not add latency to the core log's sequencing or checkpointing.
+- **Isolation**: This compute load is decoupled from the primary log's write path. The polling ingestion loop can be batched and pipelined asynchronously, ensuring that index processing does not add latency to the Input Log's sequencing or checkpointing.
 
 ### Network Egress
 
-- **Targeted Queries**: Traditional logs require monitors to download and process all leaves of the log to find entries of interest. The Verifiable Index allows clients to query for specific keys and receive targeted lists of pointers, with small inclusion proofs.
-- **Egress Reduction**: This transforms a bulk data distribution problem into a low-bandwidth query service. While operation requires additional storage and compute, it significantly reduces network egress pressure associated with log scraping.
+- **Targeted Queries**: Traditional logs require monitors to download and process all leaves of the log to find entries of interest. The Verifiable Index allows verifiers to query for specific keys and receive targeted lists of pointers, with small inclusion proofs.
+- **Egress Reduction**: Serving data is often the most costly component of log operations. This transforms a bulk data distribution problem into a low-bandwidth query service, significantly reducing network egress costs associated with log scraping.
 
 ## Design Rationale for Transparency Experts
 
