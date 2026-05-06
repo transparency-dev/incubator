@@ -65,6 +65,26 @@ The parsed outputs from the `MapFn` are physically separated into two purpose-bu
 - **Reading**: The VIndex is exclusively queried at its *latest* version; there are no historic queries. The system returns the latest list of matching indices in the Input Log, alongside inclusion proofs tying those results to the map's current root hash. Because the list of indices is structured as an append-only Merkle tree, a client who previously fetched the index at size N can simply request the delta up to size M and use a [compact range](https://github.com/transparency-dev/merkle/blob/main/docs/compact_ranges.md) to locally reconstruct and verify their historical state. No consistency proof is computed or returned by the server.
 - **Verifying**: The brand new append-only **Output Log** exists entirely for auditing. Anyone with compute resources can act as a verifier by running the universally specified MapFn against the Input Log to construct an identical local index. By comparing their computed root hash against the sequence of roots permanently published in the Output Log, they can verify every past state commitment. This guarantees that all past map revisions clients relied upon were constructed correctly, proving the operator never served an invalid map root.
 
+## Map Operation Costs
+
+Adding a Verifiable Index to a transparency deployment introduces a distinct profile of resource consumption alongside the primary append-only log. While the log handles low-compute sequencing and high-bandwidth serving, the index overlay requires additional compute and local storage to provide highly efficient, low-bandwidth serving.
+
+### Storage
+
+- **Content vs. Pointers**: Unlike the primary log which stores the full payload of every entry, the Verifiable Index does not store the original data. It stores search keys mapped to a list of pointers (8-byte indices) indicating where the full data resides in the Input Log.
+- **Overhead**: Storage requirements scale with both event volume and **key cardinality** (the number of unique search terms). The system maintains a Key-Value store mapping keys to their log of occurrences and a Merkle Prefix Trie (MPT) that stores a 32-byte root hash for each unique key ever observed. Consequently, the choice of `MapFn` and the distribution of subjects in the log drastically affect costs: a log with millions of entries for the *same* subject keeps the MPT extremely small, whereas a log with millions of *distinct* subjects forces the MPT to scale linearly with the number of keys.
+- **Optimization**: The bulk data storage is optimized to keep only the latest state for a key.
+
+### Compute
+
+- **Parsing Overhead**: The indexing process is relatively compute-intensive per leaf. Each entry must be fetched, cryptographically verified against the Input Log checkpoint, and parsed via the WebAssembly sandbox to extract mapping keys.
+- **Isolation**: This compute load is decoupled from the primary log's write path. The polling ingestion loop can be batched and pipelined asynchronously, ensuring that index processing does not add latency to the core log's sequencing or checkpointing.
+
+### Network Egress
+
+- **Targeted Queries**: Traditional logs require monitors to download and process all leaves of the log to find entries of interest. The Verifiable Index allows clients to query for specific keys and receive targeted lists of pointers, with small inclusion proofs.
+- **Egress Reduction**: This transforms a bulk data distribution problem into a low-bandwidth query service. While operation requires additional storage and compute, it significantly reduces network egress pressure associated with log scraping.
+
 ## Design Rationale for Transparency Experts
 
 For those familiar with Key Transparency (KT), Merkle Tree Certs (MTC), or other verifiable maps, the "Map Sandwich" architecture makes an intentional departure from standard map designs:
