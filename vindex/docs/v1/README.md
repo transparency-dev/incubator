@@ -72,7 +72,7 @@ Adding a Verifiable Index to a transparency deployment introduces a distinct pro
 ### Storage
 
 - **Content vs. Pointers**: Unlike the primary log which stores the full payload of every entry, the Verifiable Index does not store the original data. It stores search keys mapped to a list of pointers (8-byte indices) indicating where the full data resides in the Input Log.
-- **Overhead**: Storage requirements scale with both event volume and **key cardinality** (the number of unique search terms). The system maintains a Key-Value store mapping keys to their log of occurrences and a Merkle Prefix Trie (MPT) that stores a 32-byte root hash for each unique key ever observed. Consequently, the choice of `MapFn` and the distribution of subjects in the log drastically affect costs: a log with millions of entries for the *same* subject keeps the MPT extremely small, whereas a log with millions of *distinct* subjects forces the MPT to scale linearly with the number of keys.
+- **Overhead**: Storage requirements scale with the number of log entries, but most importantly, with **key cardinality** (the number of unique search terms). See [The Index Data Structure](#2-the-index-data-structure) for details on how state is maintained. Consequently, the choice of `MapFn` and the distribution of subjects in the log drastically affect costs: a log with millions of entries for the *same* subject keeps the MPT extremely small, whereas a log with millions of *distinct* subjects forces the MPT to scale linearly with the number of keys.
 - **Optimization**: The bulk data storage is optimized to keep only the latest state for a key.
 
 ### Compute
