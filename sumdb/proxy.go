@@ -84,11 +84,11 @@ func newReverseProxy(opts ProxyOpts) *httputil.ReverseProxy {
 				}
 				r.SetURL(distributor)
 				r.Out.URL.Path = fmt.Sprintf(distributorCheckpointPathFmt, opts.WitnessSigs)
-			} else if strings.HasPrefix(inPath, tlogEntriesPrefix) {
-				o := strings.TrimPrefix(inPath, tlogEntriesPrefix)
+			} else if after, ok := strings.CutPrefix(inPath, tlogEntriesPrefix); ok {
+				o := after
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTileDataPrefix, o)
-			} else if strings.HasPrefix(inPath, tlogTilePrefix) {
-				o := strings.TrimPrefix(inPath, tlogTilePrefix)
+			} else if after, ok := strings.CutPrefix(inPath, tlogTilePrefix); ok {
+				o := after
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTilePrefix, o)
 			}
 		},
