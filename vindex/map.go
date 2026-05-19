@@ -435,6 +435,9 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	}
 
 	// Verify the proof. Not strictly required, but good to be robust while this code is new.
+	if size > math.MaxInt64 {
+		return result, fmt.Errorf("size %d exceeds MaxInt64", size)
+	}
 	snap := mpt.Snapshot{
 		Version: int64(size),
 		Hash:    mapRoot,
