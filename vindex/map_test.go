@@ -360,7 +360,7 @@ func runBenchmark(b *testing.B, opts vindex.Options) {
 	rng := rand.New(rand.NewSource(12345))
 
 	var uniqueKeys []string
-	for i := 0; i < benchNumEntries; i++ {
+	for i := range benchNumEntries {
 		var key string
 		if len(uniqueKeys) > 0 && rng.Float64() < benchDuplicationRatio {
 			key = uniqueKeys[rng.Intn(len(uniqueKeys))]
@@ -382,7 +382,7 @@ func runBenchmark(b *testing.B, opts vindex.Options) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		dir, err := os.MkdirTemp("", "vindex-bench")
 		if err != nil {
@@ -392,34 +392,27 @@ func runBenchmark(b *testing.B, opts vindex.Options) {
 		iterCtx, iterCancel := context.WithCancel(ctx)
 
 		outputLog, closer, err := vindex.NewOutputLog(iterCtx, path.Join(dir, "outputlog"), s, v, vindex.OutputLogOpts{})
-		if err != nil {
+		b.Cleanup(func() {
 			iterCancel()
-			os.RemoveAll(dir)
+			_ = os.RemoveAll(dir)
+			if closer != nil {
+				closer()
+			}
+		})
+		if err != nil {
 			b.Fatal(err)
 		}
 
 		vi, err := vindex.NewVerifiableIndex(iterCtx, inputLog, mapFn, outputLog, dir, opts)
 		if err != nil {
-			closer()
-			iterCancel()
-			os.RemoveAll(dir)
 			b.Fatal(err)
 		}
 
 		b.StartTimer()
 		if err := vi.Update(iterCtx); err != nil {
-			iterCancel()
 			b.Fatal(err)
 		}
-		b.StopTimer()
-
 		if err := vi.Close(); err != nil {
-			iterCancel()
-			b.Fatal(err)
-		}
-		iterCancel()
-		closer()
-		if err := os.RemoveAll(dir); err != nil {
 			b.Fatal(err)
 		}
 	}
