@@ -50,6 +50,7 @@ import (
 
 var (
 	baseURL      = flag.String("base_url", "", "The base URL of the server hosting the logs and vindex.")
+	inLogPubKey  = flag.String("in_log_pub_key", "sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8", "The input log public key.")
 	outLogPubKey = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
 	modRoot      = flag.String("mod_root", "", "The path to a go module checked out locally via git.")
 )
@@ -472,6 +473,10 @@ func parseLeaf(idx uint64, data []byte) (string, modData, error) {
 }
 
 func newVIndexClientFromFlags() *client.VIndexClient {
+	inV, err := note.NewVerifier(*inLogPubKey)
+	if err != nil {
+		klog.Exitf("failed to construct Input Log verifier: %v", err)
+	}
 	outV, err := note.NewVerifier(*outLogPubKey)
 	if err != nil {
 		klog.Exitf("failed to construct VIndex verifier: %v", err)
@@ -480,7 +485,7 @@ func newVIndexClientFromFlags() *client.VIndexClient {
 	if err != nil {
 		klog.Exitf("failed to construct VIndex URL: %v", err)
 	}
-	c, err := client.NewVIndexClient(u, outV)
+	c, err := client.NewVIndexClient(u, inV, outV)
 	if err != nil {
 		klog.Exitf("failed to construct VIndex Client: %v", err)
 	}
@@ -488,7 +493,7 @@ func newVIndexClientFromFlags() *client.VIndexClient {
 }
 
 func newInputLogClientFromFlags() *client.InputLogClient {
-	v, err := note.NewVerifier("sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8")
+	v, err := note.NewVerifier(*inLogPubKey)
 	if err != nil {
 		klog.Exitf("failed to construct Input Log verifier: %v", err)
 	}

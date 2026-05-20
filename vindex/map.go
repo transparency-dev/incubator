@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"math"
 	"os"
 	"path"
 	"slices"
@@ -35,14 +36,13 @@ import (
 	"sync"
 	"time"
 
-	"filippo.io/torchwood/prefix"
-	"filippo.io/torchwood/prefix/prefixsqlite"
 	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
 	"github.com/transparency-dev/merkle/compact"
 	"github.com/transparency-dev/merkle/rfc6962"
 	"k8s.io/klog/v2"
+	"rsc.io/tmp/mpt"
 )
 
 const (
@@ -157,18 +157,29 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		return nil, err
 	}
 
-	var vtreeStorage prefix.Storage
+	var tree mpt.Tree
 	if opts.PersistIndex {
-		vtreeStorage, err = prefixsqlite.NewSQLiteStorage(ctx, path.Join(rootDir, "vindex.db"))
+		file1 := path.Join(rootDir, "mpt.tree1")
+		file2 := path.Join(rootDir, "mpt.tree2")
+		disk := path.Join(rootDir, "mpt.disk")
+		var openErr error
+		tree, openErr = mpt.Open(file1, file2, disk)
+		if openErr != nil {
+			if errors.Is(openErr, os.ErrNotExist) {
+				klog.Infof("MPT files not found, creating new MPT index tree at %s, %s, %s", file1, file2, disk)
+				var createErr error
+				tree, createErr = mpt.Create(file1, file2, disk)
+				if createErr != nil {
+					return nil, fmt.Errorf("mpt.Create(): %v", createErr)
+				}
+			} else {
+				return nil, fmt.Errorf("mpt.Open(): %v", openErr)
+			}
+		}
 	} else {
-		vtreeStorage = prefix.NewMemoryStorage()
+		tree = mpt.NewMemTree()
 	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SQL storage: %v", err)
-	}
-	if err := prefix.InitStorage(ctx, sha256.Sum256, vtreeStorage); err != nil {
-		return nil, fmt.Errorf("InitStorage: %s", err)
-	}
+
 	mapper := &inputLogMapper{
 		inputLog:  inputLog,
 		mapFn:     mapFn,
@@ -181,8 +192,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		walReader: reader,
 		db:        db,
 		outputLog: outputLog,
-		vindex:    *prefix.NewTree(sha256.Sum256, vtreeStorage),
-		vstore:    vtreeStorage,
+		vindex:    tree,
 		data:      map[[sha256.Size]byte][]uint64{},
 	}
 	// If we persisted the index then we don't need to rebuild it
@@ -351,8 +361,7 @@ type VerifiableIndex struct {
 	outputLog OutputLog
 
 	indexMu sync.RWMutex // covers vindex and data
-	vindex  prefix.Tree
-	vstore  prefix.Storage
+	vindex  mpt.Tree
 	data    map[[sha256.Size]byte][]uint64
 
 	// servingSize is the size of the input log we are serving for.
@@ -370,11 +379,11 @@ func (b *VerifiableIndex) Close() error {
 func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (api.LookupResponse, error) {
 	// Scope the lock to be as minimal as possible
 	// This looks up the indices from the in-memory map, and the proof from the vindex.
-	lookupLocked := func(key [sha256.Size]byte) (bool, []prefix.ProofNode, []uint64, error) {
+	lookupLocked := func(key [sha256.Size]byte) (mpt.Proof, []uint64, error) {
 		b.indexMu.RLock()
 		defer b.indexMu.RUnlock()
-		found, viProof, err := b.vindex.Lookup(ctx, key)
-		return found, viProof, b.data[key], err
+		proof, err := b.vindex.Prove(key)
+		return proof, b.data[key], err
 	}
 
 	result := api.LookupResponse{}
@@ -398,7 +407,7 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	}
 
 	// Parse the output log entry to get the input log tree size that the vindex was built from.
-	_, inCp, err := UnmarshalLeaf(data)
+	mapRoot, inCp, err := UnmarshalLeaf(data)
 	if err != nil {
 		return result, fmt.Errorf("failed to unmarshal output leaf: %v", err)
 	}
@@ -410,7 +419,7 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	result.OutputLogLeaf = data
 	result.OutputLogProof = proof
 
-	found, viProof, allIndices, err := lookupLocked(key)
+	viProof, allIndices, err := lookupLocked(key)
 	if err != nil {
 		return result, fmt.Errorf("failed to get inclusion proof from vindex: %v", err)
 	}
@@ -421,20 +430,26 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 
 	if cutoff >= 0 {
 		result.IndexValue = allIndices[:cutoff]
+	} else {
+		result.IndexValue = allIndices
 	}
-	result.IndexValue = allIndices
 
-	if expectFound := len(allIndices) > 0; expectFound != found {
-		return result, fmt.Errorf("found = %t, but expected %t (number of indices: %d)", found, expectFound, len(allIndices))
+	// Verify the proof. Not strictly required, but good to be robust while this code is new.
+	if size > math.MaxInt64 {
+		return result, fmt.Errorf("size %d exceeds MaxInt64", size)
 	}
-	result.IndexProof = make([]api.IndexNode, len(viProof))
-	for i, p := range viProof {
-		result.IndexProof[i] = api.IndexNode{
-			LabelBitLen: p.Label.BitLen(),
-			LabelPath:   p.Label.Bytes(),
-			Hash:        p.Hash,
-		}
+	snap := mpt.Snapshot{
+		Version: int64(size),
+		Hash:    mapRoot,
 	}
+	_, ok, err := mpt.Verify(snap, key, viProof)
+	if err != nil {
+		return result, fmt.Errorf("failed to verify proof: %v", err)
+	}
+	if expectFound := len(result.IndexValue) > 0; expectFound != ok {
+		return result, fmt.Errorf("ok = %t, but expected %t (number of indices: %d)", ok, expectFound, len(result.IndexValue))
+	}
+	result.IndexProof = viProof
 
 	return result, nil
 }
@@ -451,11 +466,15 @@ func (b *VerifiableIndex) Update(ctx context.Context) error {
 
 func (b *VerifiableIndex) publish(ctx context.Context, inCp []byte) error {
 	// Construct the leaf for the output log
-	rootNode, err := b.vstore.Load(ctx, prefix.RootLabel)
-	if err != nil {
-		return fmt.Errorf("failed to load vindex root: %v", err)
+
+	if b.servingSize > math.MaxInt64 {
+		return fmt.Errorf("servingSize %d exceeds MaxInt64", b.servingSize)
 	}
-	outIdx, rawCp, err := b.outputLog.Append(ctx, MarshalLeaf(rootNode.Hash, inCp))
+	snap, err := b.vindex.Snap(int64(b.servingSize))
+	if err != nil {
+		return fmt.Errorf("Snap(): %v", err)
+	}
+	outIdx, rawCp, err := b.outputLog.Append(ctx, MarshalLeaf(snap.Hash, inCp))
 	if err != nil {
 		return fmt.Errorf("failed to append to output log: %v", err)
 	}
@@ -577,8 +596,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 				}
 			}
 
-			// Finally, we update the vindex
-			if err := b.vindex.Insert(ctx, h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
+			if err := b.vindex.Set(h, [sha256.Size]byte(sum.Sum(nil))); err != nil {
 				return fmt.Errorf("Insert(): %s", err)
 			}
 		}

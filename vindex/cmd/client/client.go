@@ -104,11 +104,15 @@ func newVIndexClientFromFlags() *client.VIndexClient {
 	if *outLogPubKey == "" {
 		klog.Exitf("out_log_pub_key must be provided")
 	}
+	inV, err := note.NewVerifier(*inLogPubKey)
+	if err != nil {
+		klog.Exitf("failed to construct input log verifier: %v", err)
+	}
 	outV, err := note.NewVerifier(*outLogPubKey)
 	if err != nil {
 		klog.Exitf("failed to construct output log verifier: %v", err)
 	}
-	c, err := client.NewVIndexClient(*vindexBaseURL, outV)
+	c, err := client.NewVIndexClient(*vindexBaseURL, inV, outV)
 	if err != nil {
 		klog.Exitf("failed to construct VIndex Client: %v", err)
 	}

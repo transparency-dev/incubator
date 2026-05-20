@@ -181,3 +181,56 @@ Use the left and right arrow keys to browse, `g` to jump to a specific index, an
 
 [tlog-tiles]: https://c2sp.org/tlog-tiles
 
+## Performance
+
+### Setup
+
+This creates a local clone of SumDB in a tlog-tiles format. Having a local copy removes a lot of variance when running performance checks.
+
+```
+# Run a tlog-proxy for sumdb
+go run github.com/transparency-dev/incubator/sumdb/cmd@main --listen=":8089" &
+
+# Clone it
+go run github.com/transparency-dev/tessera/cmd/experimental/migrate/posix@main \
+  --storage_dir ~/log-clones/sumdb \
+  --source_url http://localhost:8089/ \
+  --save_checkpoint
+
+# Check it
+echo sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8 > ~/.go.sum.vkey
+go run github.com/transparency-dev/tessera/cmd/fsck@main \
+  --storage_url file:///$HOME/log-clones/sumdb/ \
+  --public_key ~/.go.sum.vkey \
+  --origin "go.sum database tree"
+```
+
+### Building the VIndex
+
+For performance testing, we use:
+ - The local copy of the log for performance reasons
+ - `--oneshot` and `time` to get clear timing figures for initialization
+
+Building the VIndex for the first time needs to consume everything in the log:
+```shell
+time OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+SumDBIndex+a5ed0e81+AYT6tfHpqGaSoH0gYpM7fhj1tEkM3wwYR/IhtiYh1pnj \
+  go run ./vindex/cmd/sumdbindex \
+  --storage_dir ~/vindex-sumdb/ \
+  --oneshot \
+  --input_override_url=file:///$HOME/log-clones/sumdb/ \
+  --persist_index=true
+...
+OUTPUT_LOG_PRIVATE_KEY= go run ./vindex/cmd/sumdbindex --storage_dir      164.35s user 105.55s system 147% cpu 3:03.23 total
+```
+
+Building the VIndex for the second time reloads state from file and is much faster:
+```shell
+time OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+SumDBIndex+a5ed0e81+AYT6tfHpqGaSoH0gYpM7fhj1tEkM3wwYR/IhtiYh1pnj \
+  go run ./vindex/cmd/sumdbindex \
+  --storage_dir ~/vindex-sumdb/ \
+  --oneshot \
+  --input_override_url=file:///$HOME/log-clones/sumdb/ \
+  --persist_index=true
+...
+OUTPUT_LOG_PRIVATE_KEY= go run ./vindex/cmd/sumdbindex --storage_dir      19.17s user 5.37s system 122% cpu 20.058 total
+```
