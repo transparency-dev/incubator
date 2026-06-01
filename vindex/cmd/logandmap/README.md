@@ -41,6 +41,7 @@ Running the above will run a web server hosting the following URLs:
  - `/inputlog/` - the [tlog-tiles][] base URL for the input log
  - `/vindex/lookup` - the provisional [vindex lookup API](./api/api.go)
  - `/outputlog/` - the [tlog-tiles][] base URL for the output log
+ - `/metrics` - Prometheus metrics endpoint
 
 The input log has entries for packages in the set {`foo`, `bar`, `baz`, `splat`}.
 To inspect the log, you can use the woodpecker tool (using the corresponding public key to the private key used above):
@@ -60,3 +61,14 @@ This log is processed into a verifiable map which can be looked up using the fol
 ```shell
 go run ./vindex/cmd/client --vindex_base_url http://localhost:8088/vindex/ --in_log_base_url http://localhost:8088/inputlog/ --out_log_pub_key=example.com/outputlog+07392c46+AWyS8y8ZsRmQnTr6Fr2knaa8+t6CPYFh5Ho3wJEr14B8 --in_log_pub_key=example.com/inputlog+bd6268fb+AWdGkrHKBm+pOubTrcBTV8JMDLFlF1Y8WUH1nrtLNXDr --lookup=foo
 ```
+
+## Monitoring
+
+The server exports metrics via Prometheus on the `/metrics` endpoint.
+
+Key areas covered by the metrics include:
+- **Map Function Keys**: Tracks the number of keys returned by the `MapFn` for each leaf (`vindex_map_fn_keys`).
+- **Sync Performance**: Histograms tracking the duration of fetching, mapping, and processing leaves during the synchronization phase (under `vindex_sync_*`).
+- **Build Performance**: Histograms tracking the duration of various steps in the build process, including WAL processing, MPT updates, publishing to the Output Log, and total build time (under `vindex_build_*`).
+
+

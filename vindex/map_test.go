@@ -91,11 +91,12 @@ func TestVerifiableIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer closer()
+	defer func() { closer(context.Background()) }()
 	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), vindex.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = vi.Close() }()
 
 	if err := vi.Update(ctx); err != nil {
 		t.Fatal(err)
@@ -198,11 +199,15 @@ func TestVerifiableIndex_concurrency(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer closer()
-			vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), vindex.Options{PersistIndex: tC.persist})
+			defer func() { closer(context.Background()) }()
+			vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), vindex.Options{
+				PersistIndex:   tC.persist,
+				ReportInterval: 1 * time.Millisecond,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer func() { _ = vi.Close() }()
 			if err := vi.Update(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -396,7 +401,7 @@ func runBenchmark(b *testing.B, opts vindex.Options) {
 			iterCancel()
 			_ = os.RemoveAll(dir)
 			if closer != nil {
-				closer()
+				closer(context.Background())
 			}
 		})
 		if err != nil {

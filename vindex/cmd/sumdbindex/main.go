@@ -39,6 +39,8 @@ import (
 	"github.com/transparency-dev/incubator/sumdb"
 	"github.com/transparency-dev/incubator/vindex"
 	"github.com/transparency-dev/tessera"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
@@ -74,6 +76,20 @@ func run(ctx context.Context) error {
 	if *storageDir == "" {
 		return errors.New("storage_dir must be set")
 	}
+
+	exporter, err := prometheus.New()
+	if err != nil {
+		return fmt.Errorf("failed to create prometheus exporter: %v", err)
+	}
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := provider.Shutdown(shutdownCtx); err != nil {
+			klog.Errorf("failed to shutdown meter provider: %v", err)
+		}
+	}()
+
 	outputLogDir := path.Join(*storageDir, "outputlog")
 	mapRoot := path.Join(*storageDir, "vindex")
 
@@ -110,19 +126,37 @@ func run(ctx context.Context) error {
 	})
 
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
-	defer outputCloser()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		outputCloser(shutdownCtx)
+	}()
 
 	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, mapRoot, vindex.Options{
-		PersistIndex: *persistIndex,
+		PersistIndex:  *persistIndex,
+		MeterProvider: provider,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
+	defer func() {
+		if err := vi.Close(); err != nil {
+			klog.Errorf("failed to close vindex: %v", err)
+		}
+	}()
 
 	// Run a web server to serve the input log, index, and output log.
-	if err := runWebServer(sumProxy, vi, outputLogDir); err != nil {
+	webShutdown, err := runWebServer(sumProxy, vi, outputLogDir)
+	if err != nil {
 		return fmt.Errorf("failed to start web server: %v", err)
 	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := webShutdown(shutdownCtx); err != nil {
+			klog.Errorf("failed to shutdown web server: %v", err)
+		}
+	}()
 
 	if *oneShot {
 		if err := vi.Update(ctx); err != nil {
@@ -140,7 +174,7 @@ func run(ctx context.Context) error {
 }
 
 // outputLogOrDie returns an output log using a POSIX log in the given directory.
-func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func()) {
+func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func(context.Context)) {
 	s, v := getOutputLogSignerVerifierOrDie()
 
 	olopts := vindex.OutputLogOpts{}
@@ -181,7 +215,7 @@ func maintainMap(ctx context.Context, vi *vindex.VerifiableIndex) {
 	}
 }
 
-func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir string) error {
+func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir string) (func(context.Context) error, error) {
 	web := NewServer(vi.Lookup)
 
 	olfs := http.FileServer(http.Dir(outLogDir))
@@ -192,7 +226,7 @@ func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir stri
 
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	hServer := &http.Server{
@@ -204,7 +238,8 @@ func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir stri
 		}
 	}()
 	klog.Infof("Started HTTP server listening on %s", *listen)
-	return nil
+
+	return hServer.Shutdown, nil
 }
 
 // Read output log private key from file or environment variable and generate the

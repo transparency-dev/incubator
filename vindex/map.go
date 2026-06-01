@@ -41,6 +41,8 @@ import (
 	"github.com/transparency-dev/incubator/vindex/api"
 	"github.com/transparency-dev/merkle/compact"
 	"github.com/transparency-dev/merkle/rfc6962"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 	"k8s.io/klog/v2"
 	"rsc.io/tmp/mpt"
 )
@@ -88,7 +90,9 @@ type OutputLog interface {
 }
 
 type Options struct {
-	PersistIndex bool
+	PersistIndex   bool
+	MeterProvider  metric.MeterProvider
+	ReportInterval time.Duration
 }
 
 // NewVerifiableIndex returns an IndexBuilder that pulls entries from the given inputLog, determines
@@ -180,20 +184,115 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		tree = mpt.NewMemTree()
 	}
 
+	mp := opts.MeterProvider
+	if mp == nil {
+		mp = otel.GetMeterProvider()
+	}
+	meter := mp.Meter("github.com/transparency-dev/incubator/vindex")
+	mapFnResults, err := meter.Int64Histogram(
+		"vindex.map_fn.keys",
+		metric.WithDescription("Number of keys returned by MapFn for each leaf"),
+		metric.WithUnit("1"),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	syncBoundaries := []float64{0.00001, 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5}
+	buildBoundaries := []float64{0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 1.5, 2, 5, 30}
+
+	syncFetchDuration, err := meter.Float64Histogram(
+		"vindex.sync.fetch.duration",
+		metric.WithDescription("Time spent fetching leaves from InputLog"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(syncBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	syncMapDuration, err := meter.Float64Histogram(
+		"vindex.sync.map_fn.duration",
+		metric.WithDescription("Time spent running MapFn"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(syncBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	syncProcessDuration, err := meter.Float64Histogram(
+		"vindex.sync.process.duration",
+		metric.WithDescription("Time spent in core mapper processing"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(syncBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	buildWalDuration, err := meter.Float64Histogram(
+		"vindex.build.wal.duration",
+		metric.WithDescription("Time spent reading WAL and updating in-memory map"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(buildBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	buildVIndexDuration, err := meter.Float64Histogram(
+		"vindex.build.vindex.duration",
+		metric.WithDescription("Time spent updating the MPT"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(buildBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	buildPublishDuration, err := meter.Float64Histogram(
+		"vindex.build.publish.duration",
+		metric.WithDescription("Time spent publishing to OutputLog"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(buildBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+	buildTotalDuration, err := meter.Float64Histogram(
+		"vindex.build.total.duration",
+		metric.WithDescription("Total time spent in buildMap"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(buildBoundaries...),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create histogram: %v", err)
+	}
+
+	reportInterval := opts.ReportInterval
+	if reportInterval == 0 {
+		reportInterval = 5 * time.Second
+	}
+
 	mapper := &inputLogMapper{
-		inputLog:  inputLog,
-		mapFn:     mapFn,
-		walWriter: wal,
-		db:        db,
-		r:         cr,
+		inputLog:            inputLog,
+		mapFn:               mapFn,
+		walWriter:           wal,
+		db:                  db,
+		mapFnResults:        mapFnResults,
+		syncFetchDuration:   syncFetchDuration,
+		syncMapDuration:     syncMapDuration,
+		syncProcessDuration: syncProcessDuration,
+		reportInterval:      reportInterval,
+		r:                   cr,
 	}
 	b := &VerifiableIndex{
-		mapper:    mapper,
-		walReader: reader,
-		db:        db,
-		outputLog: outputLog,
-		vindex:    tree,
-		data:      map[[sha256.Size]byte][]uint64{},
+		mapper:               mapper,
+		walReader:            reader,
+		db:                   db,
+		outputLog:            outputLog,
+		vindex:               tree,
+		data:                 map[[sha256.Size]byte][]uint64{},
+		buildWalDuration:     buildWalDuration,
+		buildVIndexDuration:  buildVIndexDuration,
+		buildPublishDuration: buildPublishDuration,
+		buildTotalDuration:   buildTotalDuration,
 	}
 	// If we persisted the index then we don't need to rebuild it
 	if err := b.buildMap(ctx, !opts.PersistIndex); err != nil {
@@ -205,10 +304,15 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 // inputLogMapper reads the Input Log, checking that the data matches the commitments,
 // and updates the WAL and DB with the resulting information.
 type inputLogMapper struct {
-	inputLog  InputLog
-	mapFn     MapFn
-	walWriter *walWriter
-	db        *pebble.DB
+	inputLog            InputLog
+	mapFn               MapFn
+	walWriter           *walWriter
+	db                  *pebble.DB
+	mapFnResults        metric.Int64Histogram
+	syncFetchDuration   metric.Float64Histogram
+	syncMapDuration     metric.Float64Histogram
+	syncProcessDuration metric.Float64Histogram
+	reportInterval      time.Duration
 
 	r *compact.Range
 }
@@ -234,80 +338,103 @@ func (m *inputLogMapper) syncFromInputLog(ctx context.Context) error {
 	}
 
 	for m.r.End() < cp.Size {
-		ctx, done := context.WithCancel(ctx)
-		defer done()
-		r := reporter{
-			lastReported: m.r.End(),
-			lastReport:   time.Now(),
-			treeSize:     cp.Size,
-		}
-		go func() {
-			ticker := time.NewTicker(5 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					r.report()
-				case <-ctx.Done():
-					return
-				}
+		err := func() error {
+			ctx, done := context.WithCancel(ctx)
+			defer done()
+			r := reporter{
+				lastReported: m.r.End(),
+				lastReport:   time.Now(),
+				treeSize:     cp.Size,
 			}
-		}()
-		for l, err := range m.inputLog.Leaves(ctx, m.r.End(), cp.Size) {
-			idx := m.r.End()
-			workDone := r.trackWork(idx)
-			if err != nil {
-				return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
-			}
-			if idx >= cp.Size {
-				return fmt.Errorf("expected stop at cp.Size=%d, but got leaf at index=%d", cp.Size, idx)
-			}
-
-			if err := m.r.Append(rfc6962.DefaultHasher.HashLeaf(l), nil); err != nil {
-				return fmt.Errorf("failed to update compact range: %v", err)
-			}
-
-			// Apply the MapFn in as safe a way as possible. This involves trapping any panics
-			// and failing gracefully.
-			var hashes [][sha256.Size]byte
-			var mapErr error
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						mapErr = fmt.Errorf("panic detected mapping index %d: %s", idx, r)
+			go func() {
+				ticker := time.NewTicker(m.reportInterval)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ticker.C:
+						r.report()
+					case <-ctx.Done():
+						return
 					}
-				}()
-				hashes = m.mapFn(l)
+				}
 			}()
-			if mapErr != nil {
-				return mapErr
-			}
-			workDone()
+			startFetch := time.Now()
+			for l, err := range m.inputLog.Leaves(ctx, m.r.End(), cp.Size) {
+				m.syncFetchDuration.Record(ctx, time.Since(startFetch).Seconds())
 
-			// This is a performance tradeoff between flushing very often and allowing data to be indexed quickly,
-			// and too often, and having things block on syscalls. One full level-1 tile seems to be a good tradeoff.
-			const storeInterval = 256 * 256
+				idx := m.r.End()
+				workDone := r.trackWork(idx)
+				if err != nil {
+					return fmt.Errorf("failed to read leaf at index %d: %v", idx, err)
+				}
+				if idx >= cp.Size {
+					return fmt.Errorf("expected stop at cp.Size=%d, but got leaf at index=%d", cp.Size, idx)
+				}
 
-			storeCompactRange := m.r.End()%storeInterval == 0 || m.r.End() == cp.Size
-			if len(hashes) == 0 && !storeCompactRange {
-				// We can skip writing out values with no hashes, as long as we're
-				// not at the end of the log.
-				// If we are at the end of the log, we need to write out a value as a sentinel
-				// even if there are no hashes.
-				continue
-			}
-			if err := m.walWriter.append(idx, hashes); err != nil {
-				return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
-			}
-			if storeCompactRange {
-				// Periodically store the validated compact range consumed so far.
-				if err := m.walWriter.flush(); err != nil {
-					return fmt.Errorf("failed to flush the WAL: %v", err)
+				startProcess := time.Now()
+				if err := m.r.Append(rfc6962.DefaultHasher.HashLeaf(l), nil); err != nil {
+					return fmt.Errorf("failed to update compact range: %v", err)
 				}
-				if err := m.storeState(); err != nil {
-					return fmt.Errorf("failed to store incremental state: %v", err)
+				processDuration := time.Since(startProcess)
+
+				// Apply the MapFn in as safe a way as possible. This involves trapping any panics
+				// and failing gracefully.
+				var hashes [][sha256.Size]byte
+				var mapErr error
+				startMap := time.Now()
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							mapErr = fmt.Errorf("panic detected mapping index %d: %s", idx, r)
+						}
+					}()
+					hashes = m.mapFn(l)
+				}()
+				if mapErr != nil {
+					return mapErr
 				}
+				m.syncMapDuration.Record(ctx, time.Since(startMap).Seconds())
+
+				m.mapFnResults.Record(ctx, int64(len(hashes)))
+				workDone()
+
+				startProcessRemainder := time.Now()
+				// This is a performance tradeoff between flushing very often and allowing data to be indexed quickly,
+				// and too often, and having things block on syscalls. One full level-1 tile seems to be a good tradeoff.
+				const storeInterval = 256 * 256
+
+				storeCompactRange := m.r.End()%storeInterval == 0 || m.r.End() == cp.Size
+				if len(hashes) == 0 && !storeCompactRange {
+					// We can skip writing out values with no hashes, as long as we're
+					// not at the end of the log.
+					// If we are at the end of the log, we need to write out a value as a sentinel
+					// even if there are no hashes.
+					processDuration += time.Since(startProcessRemainder)
+					m.syncProcessDuration.Record(ctx, processDuration.Seconds())
+					startFetch = time.Now()
+					continue
+				}
+				if err := m.walWriter.append(idx, hashes); err != nil {
+					return fmt.Errorf("failed to add index to entry for leaf %d: %v", idx, err)
+				}
+				if storeCompactRange {
+					// Periodically store the validated compact range consumed so far.
+					if err := m.walWriter.flush(); err != nil {
+						return fmt.Errorf("failed to flush the WAL: %v", err)
+					}
+					if err := m.storeState(); err != nil {
+						return fmt.Errorf("failed to store incremental state: %v", err)
+					}
+				}
+				processDuration += time.Since(startProcessRemainder)
+				m.syncProcessDuration.Record(ctx, processDuration.Seconds())
+
+				startFetch = time.Now()
 			}
+			return nil
+		}()
+		if err != nil {
+			return err
 		}
 	}
 	if err := m.walWriter.flush(); err != nil {
@@ -364,6 +491,11 @@ type VerifiableIndex struct {
 	vindex  mpt.Tree
 	data    map[[sha256.Size]byte][]uint64
 
+	buildWalDuration     metric.Float64Histogram
+	buildVIndexDuration  metric.Float64Histogram
+	buildPublishDuration metric.Float64Histogram
+	buildTotalDuration   metric.Float64Histogram
+
 	// servingSize is the size of the input log we are serving for.
 	// This a temporary workaround not having an output log, which we will eventually read to get
 	// the checkpoint size.
@@ -372,7 +504,7 @@ type VerifiableIndex struct {
 
 // Close ensures that any open connections are closed before returning.
 func (b *VerifiableIndex) Close() error {
-	return b.mapper.close()
+	return errors.Join(b.mapper.close(), b.db.Close())
 }
 
 // Lookup returns the values stored for the given key.
@@ -562,6 +694,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		}()
 	}
 	durationWal := time.Since(startWal)
+	b.buildWalDuration.Record(ctx, durationWal.Seconds())
 
 	startVIndex := time.Now()
 	if updateIndex {
@@ -602,6 +735,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		}
 	}
 	durationVIndex := time.Since(startVIndex)
+	b.buildVIndexDuration.Record(ctx, durationVIndex.Seconds())
 	durationTotal := time.Since(startWal)
 
 	b.servingSize = size
@@ -610,7 +744,11 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 	// This publish occurs within the indexMu lock intentionally.
 	// This allows Lookup to always assume that the last leaf in the Output Log is the
 	// one that commits to the current state of the index.
-	return b.publish(ctx, cpRaw)
+	startPublish := time.Now()
+	err = b.publish(ctx, cpRaw)
+	b.buildPublishDuration.Record(ctx, time.Since(startPublish).Seconds())
+	b.buildTotalDuration.Record(ctx, time.Since(startWal).Seconds())
+	return err
 }
 
 // checkpointUnsafe parses a checkpoint without performing any signature verification.
@@ -667,7 +805,7 @@ func (r *reporter) report() {
 	klog.Infof("%.1f leaves/s, last leaf=%d (remaining: %d, ETA: %s)", rate, r.lastReported, remaining, eta)
 
 	r.lastReport = time.Now()
-	r.lastReported = r.lastWorked
+	r.lastReported = lastWorked
 }
 
 func (r *reporter) trackWork(index uint64) func() {

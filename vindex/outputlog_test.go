@@ -18,6 +18,7 @@ package vindex_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"os"
 	"testing"
@@ -77,7 +78,7 @@ func TestOutputLog_Lookup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer closer()
+			defer closer(context.Background())
 
 			for _, l := range tC.leaves {
 				if _, _, err := log.Append(t.Context(), []byte(l)); err != nil {
