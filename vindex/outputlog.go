@@ -36,7 +36,7 @@ type OutputLogOpts struct {
 }
 
 // outputLogOrDie returns an output log using a POSIX log in the given directory.
-func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v note.Verifier, opts OutputLogOpts) (log OutputLog, closer func(), err error) {
+func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v note.Verifier, opts OutputLogOpts) (log OutputLog, closer func(context.Context), err error) {
 	driver, err := posix.New(ctx, posix.Config{Path: outputLogDir})
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create input log: %v", err)
@@ -63,7 +63,7 @@ func NewOutputLog(ctx context.Context, outputLogDir string, s note.Signer, v not
 		v: v,
 	}
 
-	return outputLog, func() {
+	return outputLog, func(ctx context.Context) {
 		_ = shutdown(ctx)
 	}, nil
 }

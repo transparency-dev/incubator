@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"iter"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -45,6 +46,8 @@ import (
 	"github.com/transparency-dev/tessera/api"
 	"github.com/transparency-dev/tessera/client"
 	"github.com/transparency-dev/tessera/storage/posix"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
@@ -80,6 +83,20 @@ func run(ctx context.Context) error {
 	if *storageDir == "" {
 		return errors.New("storage_dir must be set")
 	}
+
+	exporter, err := prometheus.New()
+	if err != nil {
+		return fmt.Errorf("failed to create prometheus exporter: %v", err)
+	}
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := provider.Shutdown(shutdownCtx); err != nil {
+			klog.Errorf("failed to shutdown meter provider: %v", err)
+		}
+	}()
+
 	inputLogDir := path.Join(*storageDir, "inputlog")
 	outputLogDir := path.Join(*storageDir, "outputlog")
 	mapRoot := path.Join(*storageDir, "vindex")
@@ -97,29 +114,54 @@ func run(ctx context.Context) error {
 	// Create the input log, output log, and verifiable index.
 	// The input log is continuously getting new leaves written to it.
 	inputLog, inputCloser := inputLogOrDie(ctx, inputLogDir)
-	defer inputCloser()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		inputCloser(shutdownCtx)
+	}()
 
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
-	defer outputCloser()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		outputCloser(shutdownCtx)
+	}()
 
 	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFnFromFlags(), outputLog, mapRoot, vindex.Options{
-		PersistIndex: *persistIndex,
+		PersistIndex:  *persistIndex,
+		MeterProvider: provider,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create vindex: %v", err)
 	}
+	defer func() {
+		if err := vi.Close(); err != nil {
+			klog.Errorf("failed to close vindex: %v", err)
+		}
+	}()
 
 	// Keeps the map synced with the latest published input log state.
 	go maintainMap(ctx, vi)
 
 	// Run a web server to serve the input log, index, and output log.
-	go runWebServer(vi, inputLogDir, outputLogDir)
+	webShutdown, err := runWebServer(vi, inputLogDir, outputLogDir)
+	if err != nil {
+		return fmt.Errorf("failed to start web server: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := webShutdown(shutdownCtx); err != nil {
+			klog.Errorf("failed to shutdown web server: %v", err)
+		}
+	}()
+
 	<-ctx.Done()
 	return nil
 }
 
 // inputLogOrDie returns an input log that is being updated periodically.
-func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource, closer func()) {
+func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource, closer func(context.Context)) {
 	// Gather the info needed for reading/writing checkpoints
 	ils, ilv := getInputLogSignerVerifierOrDie()
 
@@ -145,7 +187,7 @@ func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource
 	// Submits new entries to the log in the background.
 	go submitEntries(ctx, inputAppender)
 
-	return inputLog, func() {
+	return inputLog, func(ctx context.Context) {
 		if err := inputShutdown(ctx); err != nil {
 			klog.Warningf("Error shutting down Input Log appender: %v", err)
 		}
@@ -197,7 +239,7 @@ func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq
 }
 
 // outputLogOrDie returns an output log using a POSIX log in the given directory.
-func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func()) {
+func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func(context.Context)) {
 	s, v := getOutputLogSignerVerifierOrDie()
 
 	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v, vindex.OutputLogOpts{})
@@ -262,7 +304,7 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 	}
 }
 
-func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) {
+func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) (func(context.Context) error, error) {
 	web := NewServer(vi.Lookup)
 
 	ilfs := http.FileServer(http.Dir(inLogDir))
@@ -271,14 +313,23 @@ func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) {
 	r.PathPrefix("/inputlog/").Handler(http.StripPrefix("/inputlog/", ilfs))
 	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
 	web.registerHandlers(r)
+
+	listener, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return nil, err
+	}
+
 	hServer := &http.Server{
-		Addr:    *listen,
 		Handler: r,
 	}
 	go func() {
-		_ = hServer.ListenAndServe()
+		if err := hServer.Serve(listener); err != http.ErrServerClosed {
+			klog.Errorf("HTTP server Serve: %v", err)
+		}
 	}()
 	klog.Infof("Started HTTP server listening on %s", *listen)
+
+	return hServer.Shutdown, nil
 }
 
 // Read input log private key from file or environment variable and generate the

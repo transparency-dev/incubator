@@ -18,9 +18,11 @@ package vindex_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"os"
 	"testing"
+	"time"
 
 	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex"
@@ -77,7 +79,11 @@ func TestOutputLog_Lookup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer closer()
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				closer(ctx)
+			}()
 
 			for _, l := range tC.leaves {
 				if _, _, err := log.Append(t.Context(), []byte(l)); err != nil {

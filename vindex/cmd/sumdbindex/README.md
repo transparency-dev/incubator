@@ -51,6 +51,7 @@ The command above starts a web server that hosts the following URLs:
  - `/inputlog/` - the [tlog-tiles][] base URL for a proxy of the SumDB API
  - `/vindex/lookup` - the provisional [vindex lookup API](./api/api.go)
  - `/outputlog/` - the [tlog-tiles][] base URL for the output log
+ - `/metrics` - Prometheus metrics endpoint
 
 > [!NOTE]
 > This brings up a proxy server that makes SumDB available via the local server at `/inputlog/`.
@@ -234,3 +235,14 @@ time OUTPUT_LOG_PRIVATE_KEY=PRIVATE+KEY+SumDBIndex+a5ed0e81+AYT6tfHpqGaSoH0gYpM7
 ...
 OUTPUT_LOG_PRIVATE_KEY= go run ./vindex/cmd/sumdbindex --storage_dir      19.17s user 5.37s system 122% cpu 20.058 total
 ```
+
+## Monitoring
+
+The server exports metrics via Prometheus on the `/metrics` endpoint.
+
+Key areas covered by the metrics include:
+- **Map Function Keys**: Tracks the number of keys returned by the `MapFn` for each leaf (`vindex_map_fn_keys`).
+- **Sync Performance**: Histograms tracking the duration of fetching, mapping, and processing leaves during the synchronization phase (under `vindex_sync_*`).
+- **Build Performance**: Histograms tracking the duration of various steps in the build process, including WAL processing, MPT updates, publishing to the Output Log, and total build time (under `vindex_build_*`).
+
+

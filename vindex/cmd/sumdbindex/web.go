@@ -24,6 +24,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/transparency-dev/incubator/vindex/api"
 	"k8s.io/klog/v2"
 )
@@ -73,4 +74,5 @@ func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) registerHandlers(r *mux.Router) {
 	r.HandleFunc("/vindex/lookup/{hash}", s.handleLookup).Methods("GET")
+	r.Handle("/metrics", promhttp.Handler())
 }
