@@ -8,21 +8,22 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/mux v1.8.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/transparency-dev/formats v0.1.0
+	github.com/transparency-dev/formats v0.1.1
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/transparency-dev/tessera v1.0.3-0.20260318145621-a1e0ccb4adf4
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.66.0
 	go.opentelemetry.io/otel/metric v1.44.0
 	go.opentelemetry.io/otel/sdk/metric v1.44.0
-	golang.org/x/mod v0.36.0
-	golang.org/x/sync v0.20.0
+	golang.org/x/mod v0.37.0
+	golang.org/x/sync v0.21.0
 	k8s.io/klog/v2 v2.140.0
 	rsc.io/tmp/mpt v0.2.0
 )
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
+	filippo.io/mldsa v0.0.0-20260215214346-43d0283efc3e // indirect
 	github.com/DataDog/zstd v1.4.5 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProtonMail/go-crypto v1.1.6 // indirect
@@ -68,11 +69,11 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
