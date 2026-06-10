@@ -70,7 +70,9 @@ func TestVerifiableIndex_Metrics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(f)
+	defer func() {
+		_ = os.RemoveAll(f)
+	}()
 
 	old := path.Join(f, "outputlog")
 	outputLog, closer, err := vindex.NewOutputLog(ctx, old, s, v, vindex.OutputLogOpts{})
