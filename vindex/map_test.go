@@ -91,7 +91,11 @@ func TestVerifiableIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { closer(context.Background()) }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		closer(ctx)
+	}()
 	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), vindex.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +203,11 @@ func TestVerifiableIndex_concurrency(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer func() { closer(context.Background()) }()
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				closer(ctx)
+			}()
 			vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, f.Name(), vindex.Options{
 				PersistIndex:   tC.persist,
 				ReportInterval: 1 * time.Millisecond,
