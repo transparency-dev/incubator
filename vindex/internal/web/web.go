@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package web
 
 import (
 	"context"
@@ -39,8 +39,8 @@ type Server struct {
 	lookup func(context.Context, [sha256.Size]byte) (api.LookupResponse, error)
 }
 
-// handleLookup handles GET requests for looking up map entries.
-func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
+// HandleLookup handles GET requests for looking up map entries.
+func (s Server) HandleLookup(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	hashStr, ok := vars["hash"]
 	if !ok {
@@ -72,7 +72,7 @@ func (s Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s Server) registerHandlers(r *mux.Router) {
-	r.HandleFunc("/vindex/lookup/{hash}", s.handleLookup).Methods("GET")
+func (s Server) RegisterHandlers(r *mux.Router) {
+	r.HandleFunc("/vindex/lookup/{hash}", s.HandleLookup).Methods("GET")
 	r.Handle("/metrics", promhttp.Handler())
 }

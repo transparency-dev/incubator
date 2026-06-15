@@ -38,6 +38,7 @@ import (
 	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/sumdb"
 	"github.com/transparency-dev/incubator/vindex"
+	"github.com/transparency-dev/incubator/vindex/internal/web"
 	"github.com/transparency-dev/tessera"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -216,13 +217,13 @@ func maintainMap(ctx context.Context, vi *vindex.VerifiableIndex) {
 }
 
 func runWebServer(inLog http.Handler, vi *vindex.VerifiableIndex, outLogDir string) (func(context.Context) error, error) {
-	web := NewServer(vi.Lookup)
+	srv := web.NewServer(vi.Lookup)
 
 	olfs := http.FileServer(http.Dir(outLogDir))
 	r := mux.NewRouter()
 	r.PathPrefix("/inputlog/").Handler(inLog)
 	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
-	web.registerHandlers(r)
+	srv.RegisterHandlers(r)
 
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {

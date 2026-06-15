@@ -42,6 +42,7 @@ import (
 	"github.com/transparency-dev/formats/log"
 	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex"
+	"github.com/transparency-dev/incubator/vindex/internal/web"
 	"github.com/transparency-dev/tessera"
 	"github.com/transparency-dev/tessera/api"
 	"github.com/transparency-dev/tessera/client"
@@ -305,14 +306,14 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 }
 
 func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) (func(context.Context) error, error) {
-	web := NewServer(vi.Lookup)
+	srv := web.NewServer(vi.Lookup)
 
 	ilfs := http.FileServer(http.Dir(inLogDir))
 	olfs := http.FileServer(http.Dir(outLogDir))
 	r := mux.NewRouter()
 	r.PathPrefix("/inputlog/").Handler(http.StripPrefix("/inputlog/", ilfs))
 	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
-	web.registerHandlers(r)
+	srv.RegisterHandlers(r)
 
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
