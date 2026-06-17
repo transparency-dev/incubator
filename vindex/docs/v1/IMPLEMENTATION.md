@@ -91,7 +91,11 @@ Since the Output Log guarantees that clients only care about the *latest* root, 
 A major emergent property of this architecture is that the processing pipeline safely supports decoupling and **in-flight batch pipelining**. 
 
 The system does *not* need to strictly block the ingestion and KV-store phases while waiting for the network-bound Output Log to witness and publish the previous batch.
-- **Normal Operation**: The `Batch Builder` can safely map and write batches `M+1` and `M+2` to Pebble while the Output Log is still witnessing batch `M`. The `Read Server` seamlessly ignores the "future" pipelined writes in Pebble because its range queries are strictly capped by the actively published Output Log size `M`.
+- **Normal Operation**: The `Batch Builder` can safely map and write batches `M+1` and `M+2` to Pebble while the Output Log is still witnessing batch `M`. The `Read Server` seamlessly ignores the "future" pipelined writes in Pebble because its range queries are strictly capped by the actively serving Output Log size `M` (which matches the MPT state).
+- **Output Log States**: Because the Output Log commit is decoupled from the MPT update, the Output Log can contain three types of states:
+    1.  **Historical Served State**: Past states that have been successfully committed to both the Output Log and MPT.
+    2.  **Serving State**: The state currently loaded in the MPT and being served to clients.
+    3.  **Intent-to-Serve State**: A future state (up to 1 batch ahead) that has been predicted and committed to the Output Log, but not yet applied to the MPT.
 - **Crash Recovery**: If the system crashes with multiple pipelined batches in the KV store but unpublished in the Output Log, the replay recovery mechanism (`N_old` to `N_new`) automatically spans the entire gap. It will dynamically coalesce the dirtied keys from all in-flight batches into a single Output Log commit upon restart, gracefully squishing the pipeline back together.
 
 ## 5. Phase 1 Roadmap
@@ -99,7 +103,7 @@ The system does *not* need to strictly block the ingestion and KV-store phases w
 1. **Step 1: Domain Interfaces**
    - Define Go interfaces for the `InputLogReader` and `OutputLogWriter`.
 2. **Step 2: The KV & MPT Engine**
-   - Wire `rsc/tmp/mpt`, alongside a `Pebble` KV store. Pebble is updated first, and then MPT and the OutputLog. See section 6.1 for details on atomicity.
+   - Wire `rsc/tmp/mpt`, alongside a `Pebble` KV store. Pebble is updated first, then the OutputLog (using predicted MPT root), and finally MPT. See section 6.1 for details on atomicity and concurrency.
 3. **Step 3: The WASM Map Pipeline**
    - Build out the `wazero` host environment and simple test `.wasm` binaries.
 4. **Step 4: The Ingestion Loop**
@@ -111,23 +115,29 @@ The system does *not* need to strictly block the ingestion and KV-store phases w
 
 Here are design and architectural considerations that need refinement during the v1 implementation phase.
 
-### 6.1 Atomicity of the Commit Phase
+#### 6.1 Concurrency and Atomicity of the Commit Phase
 
-If the system crashes during the commit phase (e.g., after the KV store is updated but before the Output Log is successfully published), the persistent KV store will have run ahead of the published Output Log checkpoint. To recover safely without complex Write-Ahead Logs or background garbage collection tasks, the `Batch Builder` utilizes determinism and a special KV checkpoint.
+To prevent blocking reads during the slow, network-bound Output Log publication phase, the updater utilizes the `Predict` API of the MPT. This allows us to calculate the future root hash without mutating the active tree.
+
+**Commit Flow & Critical Block:**
+1.  **Prepare Changes**: The `Index Updater` collects the batch of changes.
+2.  **Predict Hash (Non-blocking)**: The updater calls `MPT.Predict(changes)` to obtain the new root hash `H_{M+1}`. This is a read-only operation and does not block concurrent reads on the MPT.
+3.  **Commit Intent (Non-blocking)**: The updater appends `H_{M+1}` to the Output Log. This generally requires witnessing from external parties before publication. During this slow network call, the MPT remains at state `H_M` and continues to serve reads for version `M`.
+4.  **Critical Block (Exclusive Lock)**: Once the Output Log append succeeds, the updater enters the critical block:
+    *   Acquire exclusive write lock on MPT.
+    *   Apply changes to MPT (`MPT.Set(changes)`). This is a fast, local memory/disk operation.
+    *   Call `MPT.Snap()` to transition the MPT to `H_{M+1}` (verifying it matches the predicted hash).
+    *   Update the serving version metadata (`servingOutputLogIndex`) to point to the new entry.
+    *   Release the exclusive lock.
+
+This limits the exclusive lock duration to only the local MPT mutation, avoiding latency spikes from network roundtrips.
 
 **Recovery Strategy:**
-1. **Atomic KV Metadata**: When the `Batch Builder` writes a batch of new indices and compact ranges to Pebble, it also atomically writes an internal target checkpoint metadata key (`_pebble_target_checkpoint = IL_Checkpoint_New`).
-2. **Crash Detection**: On startup, the daemon reads the latest size from the published Output Log (`N_old`) and compares it against the size in `_pebble_target_checkpoint` (`N_new`). If `N_new > N_old`, the daemon knows Pebble successfully committed the batch, but the MPT/Output Log commit failed.
-3. **Replaying the MapFn**: Rather than performing a full, expensive scan of the entire Pebble DB to discover which keys were updated (which would be required because the schema `Hash+Index` does not index by update-time), the `Batch Builder` simply fetches the Input Log leaves from `N_old` to `N_new` and re-runs the deterministic `MapFn`. 
-4. **Resuming the Pipeline**: The `MapFn` acts as an exact diff generator, identically yielding the precise set of keys modified in the lost batch. The system looks up the *latest* already-written compact range for each of those dirtied keys in Pebble (which sit intact at sequence `N_new`), derives the sub-root hash, updates the MPT, and safely attempts to commit the `MapRoot` to the Output Log again. It is irrelevant whether the MPT had already been successfully updated prior to the crash; any tree rewrites during this recovery phase are inherently idempotent.
-
-> [!NOTE]
-> **Pending Discussion (MPT Concurrency & Snapshots)**
-> While we have a robust strategy for recovering the KV store using deterministic replay, the MPT presents a severe concurrency bottleneck if it lacks snapshot capabilities. Because the `Read Server` strictly serves the last *published* Output Log state (`N_old`), an MPT that mutates in place cannot be safely queried while it is being updated to `N_new`. 
-> 1. **Normal Operation**: To prevent serving uncommitted data, the `Index Updater` would need to hold a global exclusive mutex on the MPT. This lock would block all reads for the entire duration of the MPT update *and* the synchronous Output Log witnessing phase, causing massive latency spikes on every batch.
-> 2. **Crash Recovery**: A crash *after* the MPT is mutated but *before* the Output Log publishes leaves the MPT stuck at `N_new`, completely breaking reads for `N_old` until the recovery process finishes.
->
-> **Action**: We must evaluate `rsc/tmp/mpt` capabilities with Russ to determine if it can support A/B versions of the tree (or reliable snapshots). This is a critical path requirement ensuring the Read Server can seamlessly and concurrently serve the prior state during both normal ingestion and crash recovery.
+If the system crashes during this process, the recovery depends on which phase failed:
+1.  **Crash before Output Log commit**: Pebble may have run ahead (`_pebble_target_checkpoint = N_new`), but Output Log is at `N_old`.
+    *   *Recovery*: Replay `N_old` to `N_new` from Input Log, re-run `MapFn`, call `Predict` to get `H_new`, commit to Output Log, then update MPT.
+2.  **Crash after Output Log commit, before MPT update**: Output Log has `N_new` (intent-to-serve), but MPT is still at `N_old`.
+    *   *Recovery*: Detect `MPT.Version < OutputLog.Version`. Replay `N_old` to `N_new` to generate the diff, apply the changes to the MPT (idempotent), and update the serving metadata. No Output Log write is needed.
 
 ## 7. WASM Guest SDK Preview
 
