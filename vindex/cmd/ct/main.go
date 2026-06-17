@@ -347,19 +347,70 @@ func mapFn(data []byte) [][sha256.Size]byte {
 	case 0:
 		// x509
 		isPreCert = false
-		s.ReadUint24LengthPrefixed(&cert)
-	case 1:
-		if true {
-			// Need to support parsing TBS certs
+		if !s.ReadUint24LengthPrefixed(&cert) {
+			klog.Warning("Failed to read x509 certificate")
 			return nil
 		}
+	case 1:
 		// precert
 		isPreCert = true
 		var ikh []byte
-		s.ReadBytes(&ikh, sha256.Size)
-		s.ReadUint24LengthPrefixed(&cert)
+		if !s.ReadBytes(&ikh, sha256.Size) {
+			klog.Warning("Failed to read issuer key hash")
+			return nil
+		}
+		var tbsCert cryptobyte.String
+		if !s.ReadUint24LengthPrefixed(&tbsCert) {
+			klog.Warning("Failed to read precert TBSCertificate")
+			return nil
+		}
+
+		tbsDER := []byte(tbsCert)
+		tbsCertCopy := tbsCert
+
+		var tbsSeq cryptobyte.String
+		if !tbsCertCopy.ReadASN1(&tbsSeq, 0x30) { // SEQUENCE
+			klog.Warning("failed to read TBSCertificate sequence")
+			return nil
+		}
+
+		if tbsSeq.PeekASN1Tag(0xA0) {
+			var version cryptobyte.String
+			if !tbsSeq.ReadASN1(&version, 0xA0) {
+				klog.Warning("failed to read version")
+				return nil
+			}
+		}
+
+		var serial cryptobyte.String
+		if !tbsSeq.ReadASN1(&serial, 0x02) { // INTEGER
+			klog.Warning("failed to read serial number")
+			return nil
+		}
+
+		var sigAlg cryptobyte.String
+		if !tbsSeq.ReadASN1Element(&sigAlg, 0x30) { // SEQUENCE
+			klog.Warning("failed to read signature algorithm")
+			return nil
+		}
+
+		var certBuilder cryptobyte.Builder
+		certBuilder.AddASN1(0x30, func(b *cryptobyte.Builder) { // SEQUENCE
+			b.AddBytes(tbsDER)
+			b.AddBytes([]byte(sigAlg))
+			b.AddASN1(3, func(b *cryptobyte.Builder) {
+				b.AddBytes([]byte{0, 0})
+			})
+		})
+		dummyCertDER, err := certBuilder.Bytes()
+		if err != nil {
+			klog.Warningf("failed to build dummy cert: %v", err)
+			return nil
+		}
+		cert = cryptobyte.String(dummyCertDER)
 	default:
-		panic("unknown cert type")
+		klog.Warningf("unknown cert type: %d", certType)
+		return nil
 	}
 
 	parsedCert, err := x509.ParseCertificate(cert)
