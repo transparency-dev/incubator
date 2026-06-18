@@ -37,6 +37,14 @@ This provides two key guarantees:
 
 The result is a system that extends the verifiability of the underlying log to its queries, preserving the end-to-end chain of trust while providing the efficiency modern systems require.
 
+Using pointers as the values in this data structure is an important part of the design:
+
+- Evolution of the value for a key is predictable: it's an append-only data structure
+- Values stay small: pointers to the values mean that the index doesn't need to duplicate values
+
+Compare the above against the more powerful, but less efficient, general map (e.g. the [batchmap](https://github.com/google/trillian/tree/master/experimental/batchmap)).
+The vision is that the Verifiable Index will meet 80% of use-cases, and the general map (with general `ReduceFn`s) will be required for more advanced needs.
+
 ## Applications
 
 This verifiable map can be applied to any log where users have a need to enumerate all values matching a specific query. For example:
