@@ -18,6 +18,7 @@ package client
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -26,6 +27,7 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex"
@@ -78,7 +80,7 @@ func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, in
 	}
 	ilcp, _, _, err := log.ParseCheckpoint(inCp, origin, inV)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse input log checkpoint: %v", err)
+		return nil, nil, fmt.Errorf("failed to parse input log checkpoint: %v (verifier: %s, keyhash: %08x; available signatures: %s)", err, inV.Name(), inV.KeyHash(), dumpSignatures(inCp))
 	}
 
 	expectFound := len(resp.IndexValue) > 0
@@ -302,3 +304,29 @@ type logClient interface {
 	ReadTile(ctx context.Context, l, i uint64, p uint8) ([]byte, error)
 	ReadEntryBundle(ctx context.Context, i uint64, p uint8) ([]byte, error)
 }
+
+func dumpSignatures(noteBytes []byte) string {
+	lines := strings.Split(string(noteBytes), "\n")
+	var sigs []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "\u2014 ") {
+			parts := strings.SplitN(line[4:], " ", 2)
+			if len(parts) == 2 {
+				name := parts[0]
+				sigB64 := parts[1]
+				sigBytes, err := base64.StdEncoding.DecodeString(sigB64)
+				if err == nil && len(sigBytes) >= 4 {
+					kh := binary.BigEndian.Uint32(sigBytes[:4])
+					sigs = append(sigs, fmt.Sprintf("%s (keyhash %08x)", name, kh))
+				} else {
+					sigs = append(sigs, name)
+				}
+			}
+		}
+	}
+	if len(sigs) == 0 {
+		return "none"
+	}
+	return strings.Join(sigs, ", ")
+}
+
