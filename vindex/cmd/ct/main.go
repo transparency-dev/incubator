@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC. All Rights Reserved.
+// Copyright 2026 Google LLC. All Rights Reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// logandmap is a binary that serves as a demo of how to run a log and a map in the
-// same process.
-// The log is a Tessera POSIX log, and the map is an in-memory verifiable index.
-// A web server is hosted that allows lookups in the map to be performed.
-// The log is updated periodically with entries of type LogEntry, and the map keys
-// each of the module names from that struct to each of the indices in the log where
-// an entry for that module is stored.
+// ct is a binary that indexes a static CT log (the input log) into a verifiable
+// index, and publishes the index checkpoints to a Tessera POSIX log (the output log).
+// A web server is hosted that allows lookups in the index to be performed.
 package main
 
 import (
@@ -89,6 +85,16 @@ func run(ctx context.Context) error {
 	if *storageDir == "" {
 		return errors.New("storage_dir must be set")
 	}
+	if *inputLogUrl == "" {
+		return errors.New("monitoring_url must be set")
+	}
+	if *origin == "" {
+		return errors.New("origin must be set")
+	}
+	if *pubKey == "" {
+		return errors.New("public_key must be set")
+	}
+
 	outputLogDir := path.Join(*storageDir, "outputlog")
 	mapRoot := path.Join(*storageDir, "vindex")
 
@@ -112,10 +118,16 @@ func run(ctx context.Context) error {
 		}
 	}()
 
-	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
+	outputLog, outputCloser, err := newOutputLogFromFlags(ctx, outputLogDir)
+	if err != nil {
+		return err
+	}
 	defer outputCloser(ctx)
 
-	inputLog := newStaticCTInputLogFromFlags()
+	inputLog, err := newStaticCTInputLogFromFlags()
+	if err != nil {
+		return err
+	}
 
 	vi, err := vindex.NewVerifiableIndex(ctx, inputLog, mapFn, outputLog, mapRoot, vindex.Options{
 		PersistIndex:  *persistIndex,
@@ -148,7 +160,7 @@ func cutEntry(tile []byte) (entry []byte, rh tlog.Hash, rest []byte, err error) 
 	return entry, rh, rest, nil
 }
 
-func newStaticCTInputLogFromFlags() *staticCTInputLog {
+func newStaticCTInputLogFromFlags() (*staticCTInputLog, error) {
 	ua := userAgent
 	if *userAgentInfo != "" {
 		ua = fmt.Sprintf("%s (%s)", userAgent, *userAgentInfo)
@@ -157,24 +169,28 @@ func newStaticCTInputLogFromFlags() *staticCTInputLog {
 		torchwood.WithTilePath(sunlight.TilePath),
 		torchwood.WithUserAgent(ua))
 	if err != nil {
-		klog.Exitf("failed to create client: %v", err)
+		return nil, fmt.Errorf("failed to create tile fetcher: %w", err)
 	}
 	var tileReader torchwood.TileReader = fetcher
 	if *persistentCacheDir != "" {
 		tileReader, err = torchwood.NewPermanentCache(fetcher, *persistentCacheDir)
 		if err != nil {
-			klog.Exitf("failed to create permanent cache: %v", err)
+			return nil, fmt.Errorf("failed to create permanent cache: %w", err)
 		}
 	}
 	client, err := torchwood.NewClient(tileReader, torchwood.WithCutEntry(cutEntry))
 	if err != nil {
-		klog.Exitf("failed to create client: %v", err)
+		return nil, fmt.Errorf("failed to create torchwood client: %w", err)
+	}
+	v, err := verifierFromFlags()
+	if err != nil {
+		return nil, err
 	}
 	return &staticCTInputLog{
 		c: client,
 		f: fetcher,
-		v: verifierFromFlags(),
-	}
+		v: v,
+	}, nil
 }
 
 type staticCTInputLog struct {
@@ -224,45 +240,47 @@ func (l *staticCTInputLog) Leaves(ctx context.Context, start, end uint64) iter.S
 	}
 }
 
-// outputLogOrDie returns an output log using a POSIX log in the given directory.
-func outputLogOrDie(ctx context.Context, outputLogDir string) (log vindex.OutputLog, closer func(context.Context)) {
-	s, v := getOutputLogSignerVerifierOrDie()
+func newOutputLogFromFlags(ctx context.Context, outputLogDir string) (vindex.OutputLog, func(context.Context), error) {
+	s, v, err := getOutputLogSignerVerifier()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	l, c, err := vindex.NewOutputLog(ctx, outputLogDir, s, v, vindex.OutputLogOpts{})
 	if err != nil {
-		klog.Exit(err)
+		return nil, nil, fmt.Errorf("failed to create output log: %w", err)
 	}
-	return l, c
+	return l, c, nil
 }
 
-func verifierFromFlags() note.Verifier {
+func verifierFromFlags() (note.Verifier, error) {
 	if *origin == "" {
-		klog.Exitf("Must provide the --origin flag")
+		return nil, errors.New("origin must be set")
 	}
 	if *pubKey == "" {
-		klog.Exitf("Must provide the --pub_key flag")
+		return nil, errors.New("public_key must be set")
 	}
 	derBytes, err := base64.StdEncoding.DecodeString(*pubKey)
 	if err != nil {
-		klog.Exitf("Error decoding public key: %s", err)
+		return nil, fmt.Errorf("error decoding public key: %w", err)
 	}
 	pub, err := x509.ParsePKIXPublicKey(derBytes)
 	if err != nil {
-		klog.Exitf("Error parsing public key: %v", err)
+		return nil, fmt.Errorf("error parsing public key: %w", err)
 	}
 
 	verifierKey, err := fnote.RFC6962VerifierString(*origin, pub)
 	if err != nil {
-		klog.Exitf("Error creating RFC6962 verifier string: %v", err)
+		return nil, fmt.Errorf("error creating RFC6962 verifier string: %w", err)
 	}
 	logSigV, err := fnote.NewVerifier(verifierKey)
 	if err != nil {
-		klog.Exitf("Error creating verifier: %v", err)
+		return nil, fmt.Errorf("error creating verifier: %w", err)
 	}
 
 	klog.Infof("Using verifier string: %v", verifierKey)
 
-	return logSigV
+	return logSigV, nil
 }
 
 // maintainMap reads entries from the log and sync them to the vindex.
@@ -301,25 +319,25 @@ func runWebServer(vi *vindex.VerifiableIndex, outLogDir string) {
 
 // Read output log private key from file or environment variable and generate the
 // note Signer and Verifier pair for it.
-func getOutputLogSignerVerifierOrDie() (note.Signer, note.Verifier) {
+func getOutputLogSignerVerifier() (note.Signer, note.Verifier, error) {
 	var privKey string
 	var err error
 	if len(*outputLogPrivKeyFile) > 0 {
 		privKey, err = getKeyFile(*outputLogPrivKeyFile)
 		if err != nil {
-			klog.Exitf("Unable to get private key: %v", err)
+			return nil, nil, fmt.Errorf("unable to get private key: %w", err)
 		}
 	} else {
 		privKey = os.Getenv("OUTPUT_LOG_PRIVATE_KEY")
 		if len(privKey) == 0 {
-			klog.Exit("Supply private key file path using --output_log_private_key or set OUTPUT_LOG_PRIVATE_KEY environment variable")
+			return nil, nil, errors.New("supply private key file path using --output_log_private_key or set OUTPUT_LOG_PRIVATE_KEY environment variable")
 		}
 	}
 	s, v, err := fnote.NewEd25519SignerVerifier(privKey)
 	if err != nil {
-		klog.Exitf("Failed to get signer/verifier: %v", err)
+		return nil, nil, fmt.Errorf("failed to get signer/verifier: %w", err)
 	}
-	return s, v
+	return s, v, nil
 }
 
 func getKeyFile(path string) (string, error) {

@@ -137,8 +137,11 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 }
 
 func inputLogVerifierFromFlags() note.Verifier {
-	if *inLogPubKey == "" && *inLogPubKeyDER == "" {
+	if (*inLogPubKey == "") == (*inLogPubKeyDER == "") {
 		klog.Exitf("Must provide exactly one --in_log_pub_key* flag")
+	}
+	if *inLogPubKeyDER != "" && *inLogOrigin == "" {
+		klog.Exitf("in_log_origin must be provided when using in_log_pub_key_der")
 	}
 	if *inLogPubKey != "" {
 		v, err := note.NewVerifier(*inLogPubKey)
