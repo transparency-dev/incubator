@@ -44,7 +44,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"k8s.io/klog/v2"
-	"rsc.io/tmp/mpt"
+	"filippo.io/torchwood/mpt"
 )
 
 const (
@@ -514,7 +514,7 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	lookupLocked := func(key [sha256.Size]byte) (mpt.Proof, []uint64, error) {
 		b.indexMu.RLock()
 		defer b.indexMu.RUnlock()
-		proof, err := b.vindex.Prove(key)
+		_, _, proof, err := b.vindex.Prove(key)
 		return proof, b.data[key], err
 	}
 
@@ -570,16 +570,24 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	if size > math.MaxInt64 {
 		return result, fmt.Errorf("size %d exceeds MaxInt64", size)
 	}
+	expectFound := len(result.IndexValue) > 0
+	var val []byte
+	if expectFound {
+		sum := sha256.New()
+		for _, idx := range result.IndexValue {
+			if err := binary.Write(sum, binary.BigEndian, idx); err != nil {
+				return result, fmt.Errorf("failed to calculate expected value hash: %v", err)
+			}
+		}
+		val = sum.Sum(nil)
+	}
+
 	snap := mpt.Snapshot{
 		Version: int64(size),
 		Hash:    mapRoot,
 	}
-	_, ok, err := mpt.Verify(snap, key, viProof)
-	if err != nil {
+	if err := mpt.Verify(snap, key[:], val, expectFound, viProof); err != nil {
 		return result, fmt.Errorf("failed to verify proof: %v", err)
-	}
-	if expectFound := len(result.IndexValue) > 0; expectFound != ok {
-		return result, fmt.Errorf("ok = %t, but expected %t (number of indices: %d)", ok, expectFound, len(result.IndexValue))
 	}
 	result.IndexProof = viProof
 

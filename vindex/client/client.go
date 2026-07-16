@@ -16,7 +16,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -37,7 +36,7 @@ import (
 	"github.com/transparency-dev/tessera/client"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
-	"rsc.io/tmp/mpt"
+	"filippo.io/torchwood/mpt"
 )
 
 func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, inV, outV note.Verifier) ([]uint64, []byte, error) {
@@ -84,17 +83,18 @@ func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, in
 		return nil, nil, fmt.Errorf("failed to parse input log checkpoint: %v", err)
 	}
 
+	expectFound := len(resp.IndexValue) > 0
+	var val []byte
+	if expectFound {
+		val = vindexLeafHash
+	}
+
 	snap := mpt.Snapshot{
 		Version: int64(ilcp.Size),
 		Hash:    mapRoot,
 	}
-	kvHash, ok, err := mpt.Verify(snap, keyHash, resp.IndexProof)
-	if err != nil {
+	if err := mpt.Verify(snap, keyHash[:], val, expectFound, resp.IndexProof); err != nil {
 		return nil, nil, fmt.Errorf("mpt.Verify(): %v", err)
-	}
-
-	if ok && !bytes.Equal(kvHash[:], vindexLeafHash) {
-		return nil, nil, fmt.Errorf("failed to verify membership: %x != %x", kvHash, vindexLeafHash)
 	}
 
 	return resp.IndexValue, inCp, nil
