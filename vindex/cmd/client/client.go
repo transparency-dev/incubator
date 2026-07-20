@@ -19,25 +19,29 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"slices"
 
+	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex/client"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
 
 var (
-	vindexBaseURL = flag.String("vindex_base_url", "", "The base URL of the vindex server.")
-	inLogBaseURL  = flag.String("in_log_base_url", "", "The base URL of the input log.")
-	lookup        = flag.String("lookup", "", "The key to look up in the vindex.")
-	outLogPubKey  = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint.")
-	inLogPubKey   = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint.")
-	inLogOrigin   = flag.String("in_log_origin", "", "Optional: allows the Input Log Origin string to be configured to something other than the public key name.")
-	minIdx        = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
+	vindexBaseURL  = flag.String("vindex_base_url", "", "The base URL of the vindex server.")
+	inLogBaseURL   = flag.String("in_log_base_url", "", "The base URL of the input log.")
+	lookup         = flag.String("lookup", "", "The key to look up in the vindex.")
+	outLogPubKey   = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint. Required.")
+	inLogPubKey    = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint. Required.")
+	inLogPubKeyDER = flag.String("in_log_pub_key_der", "", "For CT logs. The public key to use to verify the input log checkpoint. Required, along with in_log_origin.")
+	inLogOrigin    = flag.String("in_log_origin", "", "Required if in_log_pub_key_der is used. Otherwise, allows the Input Log Origin string to be configured to something other than the public key name.")
+	minIdx         = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
 )
 
 func main() {
@@ -104,10 +108,7 @@ func newVIndexClientFromFlags() *client.VIndexClient {
 	if *outLogPubKey == "" {
 		klog.Exitf("out_log_pub_key must be provided")
 	}
-	inV, err := note.NewVerifier(*inLogPubKey)
-	if err != nil {
-		klog.Exitf("failed to construct input log verifier: %v", err)
-	}
+	inV := inputLogVerifierFromFlags()
 	outV, err := note.NewVerifier(*outLogPubKey)
 	if err != nil {
 		klog.Exitf("failed to construct output log verifier: %v", err)
@@ -123,13 +124,7 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 	if *inLogBaseURL == "" {
 		klog.Exit("in_log_base_url flag must be provided")
 	}
-	if *inLogPubKey == "" {
-		klog.Exitf("in_log_pub_key must be provided")
-	}
-	v, err := note.NewVerifier(*inLogPubKey)
-	if err != nil {
-		klog.Exitf("failed to construct input log verifier: %v", err)
-	}
+	v := inputLogVerifierFromFlags()
 	origin := *inLogOrigin
 	if len(origin) == 0 {
 		origin = v.Name()
@@ -139,4 +134,38 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 		klog.Exitf("failed to construct Input Log client: %v", err)
 	}
 	return c
+}
+
+func inputLogVerifierFromFlags() note.Verifier {
+	if (*inLogPubKey == "") == (*inLogPubKeyDER == "") {
+		klog.Exitf("Must provide exactly one --in_log_pub_key* flag")
+	}
+	if *inLogPubKeyDER != "" && *inLogOrigin == "" {
+		klog.Exitf("in_log_origin must be provided when using in_log_pub_key_der")
+	}
+	if *inLogPubKey != "" {
+		v, err := note.NewVerifier(*inLogPubKey)
+		if err != nil {
+			klog.Exitf("failed to construct input log verifier: %v", err)
+		}
+		return v
+	}
+	derBytes, err := base64.StdEncoding.DecodeString(*inLogPubKeyDER)
+	if err != nil {
+		klog.Exitf("Error decoding public key: %s", err)
+	}
+	pub, err := x509.ParsePKIXPublicKey(derBytes)
+	if err != nil {
+		klog.Exitf("Error parsing public key: %v", err)
+	}
+
+	verifierKey, err := fnote.RFC6962VerifierString(*inLogOrigin, pub)
+	if err != nil {
+		klog.Exitf("Error creating RFC6962 verifier string: %v", err)
+	}
+	v, err := fnote.NewVerifier(verifierKey)
+	if err != nil {
+		klog.Exitf("Error creating verifier: %v", err)
+	}
+	return v
 }
