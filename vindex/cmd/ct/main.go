@@ -52,7 +52,7 @@ import (
 )
 
 var (
-	inputLogUrl        = flag.String("monitoring_url", "", "Base URL of the static CT log to index")
+	inputLogUrl        = flag.String("input_log_url", "", "Base URL of the static CT log to index. This must be the monitoring URL, not the submission URL.")
 	origin             = flag.String("origin", "", "Origin of the log to check")
 	pubKey             = flag.String("public_key", "", "The log's public key in base64 encoded DER format")
 	userAgentInfo      = flag.String("user_agent_info", "", "Optional string to append to the user agent (e.g. email address for Sunlight logs)")
@@ -86,7 +86,7 @@ func run(ctx context.Context) error {
 		return errors.New("storage_dir must be set")
 	}
 	if *inputLogUrl == "" {
-		return errors.New("monitoring_url must be set")
+		return errors.New("input_log_url must be set")
 	}
 	if *origin == "" {
 		return errors.New("origin must be set")
@@ -312,7 +312,9 @@ func runWebServer(vi *vindex.VerifiableIndex, outLogDir string) {
 		Handler: r,
 	}
 	go func() {
-		_ = hServer.ListenAndServe()
+		if err := hServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			klog.Exitf("HTTP server failed: %v", err)
+		}
 	}()
 	klog.Infof("Started HTTP server listening on %s", *listen)
 }
