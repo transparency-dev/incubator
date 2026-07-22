@@ -504,14 +504,8 @@ func (b *VerifiableIndex) Close() error {
 
 // Lookup returns the values stored for the given key.
 func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (api.LookupResponse, error) {
-	// Scope the lock to be as minimal as possible
-	// This looks up the indices from the in-memory map, and the proof from the vindex.
-	lookupLocked := func(key [sha256.Size]byte) (mpt.Proof, []uint64, error) {
-		b.indexMu.RLock()
-		defer b.indexMu.RUnlock()
-		_, _, proof, err := b.vindex.Prove(key)
-		return proof, b.data[key], err
-	}
+	b.indexMu.RLock()
+	defer b.indexMu.RUnlock()
 
 	result := api.LookupResponse{}
 
@@ -546,10 +540,11 @@ func (b *VerifiableIndex) Lookup(ctx context.Context, key [sha256.Size]byte) (ap
 	result.OutputLogLeaf = data
 	result.OutputLogProof = proof
 
-	viProof, allIndices, err := lookupLocked(key)
+	_, _, viProof, err := b.vindex.Prove(key)
 	if err != nil {
 		return result, fmt.Errorf("failed to get inclusion proof from vindex: %v", err)
 	}
+	allIndices := b.data[key]
 
 	cutoff := slices.IndexFunc(allIndices, func(idx uint64) bool {
 		return idx >= size
