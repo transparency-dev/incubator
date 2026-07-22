@@ -142,7 +142,8 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		size = binary.BigEndian.Uint64(sizeBs)
 		crHashes := make([][]byte, len(crBs)/sha256.Size)
 		for i := range crHashes {
-			crHashes[i] = crBs[i*sha256.Size : (i+1)*sha256.Size]
+			crHashes[i] = make([]byte, sha256.Size)
+			copy(crHashes[i], crBs[i*sha256.Size:(i+1)*sha256.Size])
 		}
 		klog.V(1).Infof("Loaded compact range state from PebbleDB: size=%d, hashes=%d", size, len(crHashes))
 		cr, err = crf.NewRange(0, size, crHashes)
@@ -654,10 +655,10 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		}
 		return fmt.Errorf("failed to read latest checkpoint: %v", err)
 	}
-	if err := closer.Close(); err != nil {
-		return fmt.Errorf("failed to close: %v", err)
-	}
 	_, size, _, err := checkpointUnsafe(cpRaw)
+	if cerr := closer.Close(); cerr != nil {
+		return fmt.Errorf("failed to close: %v", cerr)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to parse checkpoint: %v", err)
 	}
