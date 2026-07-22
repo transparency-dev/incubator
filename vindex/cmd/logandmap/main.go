@@ -59,6 +59,7 @@ var (
 	storageDir           = flag.String("storage_dir", "", "Root directory in which to store the data for the demo. This will create subdirectories for the Input Log, Output Log, and allocate space to store the verifiable map persistence.")
 	persistIndex         = flag.Bool("persist_index", true, "Set to false to use a memory-based implementation of the verifiable index.")
 	listen               = flag.String("listen", ":8088", "Address to set up HTTP server listening on")
+	inputLogReaders      = flag.Uint("input_log_readers", 4, "Number of parallel readers for the input log")
 )
 
 func main() {
@@ -181,8 +182,9 @@ func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource
 	}
 
 	inputLog := logReaderSource{
-		r: inputReader,
-		v: ilv,
+		r:          inputReader,
+		v:          ilv,
+		numReaders: *inputLogReaders,
 	}
 
 	// Submits new entries to the log in the background.
@@ -197,8 +199,9 @@ func inputLogOrDie(ctx context.Context, inputLogDir string) (log logReaderSource
 
 // logReaderSource adapts a tessera.LogReader to a vindex.InputLog.
 type logReaderSource struct {
-	r tessera.LogReader
-	v note.Verifier
+	r          tessera.LogReader
+	v          note.Verifier
+	numReaders uint
 }
 
 func (s logReaderSource) Checkpoint(ctx context.Context) (checkpoint []byte, err error) {
@@ -214,7 +217,7 @@ func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq
 	tsf := func(ctx context.Context) (uint64, error) {
 		return end, nil
 	}
-	bi := client.EntryBundles(ctx, 2, tsf, s.r.ReadEntryBundle, start, end-start)
+	bi := client.EntryBundles(ctx, s.numReaders, tsf, s.r.ReadEntryBundle, start, end-start)
 	unbundleFn := func(bundle []byte) ([][]byte, error) {
 		eb := &api.EntryBundle{}
 		if err := eb.UnmarshalText(bundle); err != nil {

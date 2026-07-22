@@ -58,6 +58,7 @@ var (
 
 	oneShot          = flag.Bool("oneshot", false, "Set to true to build the map once and then exit")
 	inputOverrideUrl = flag.String("input_override_url", "", "Set this to read from a different URL than the local proxy. Supports file paths. Intended for performance testing. Note this log MUST be presented as tlog-tiles format.")
+	inputLogReaders  = flag.Uint("input_log_readers", 4, "Number of parallel readers for the input log")
 )
 
 func main() {
@@ -117,6 +118,7 @@ func run(ctx context.Context) error {
 	inputLog, err := vindex.NewTiledInputLog(sumUrl, sumV, vindex.InputLogOpts{
 		HttpClient: http.DefaultClient,
 		Origin:     "go.sum database tree",
+		NumReaders: *inputLogReaders,
 	})
 	if err != nil {
 		return err

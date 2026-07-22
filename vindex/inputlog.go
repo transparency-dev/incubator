@@ -36,6 +36,7 @@ type fetcher interface {
 type InputLogOpts struct {
 	HttpClient *http.Client
 	Origin     string
+	NumReaders uint
 }
 
 func NewTiledInputLog(base *url.URL, v note.Verifier, o InputLogOpts) (InputLog, error) {
@@ -45,6 +46,9 @@ func NewTiledInputLog(base *url.URL, v note.Verifier, o InputLogOpts) (InputLog,
 	}
 	if len(o.Origin) == 0 {
 		o.Origin = v.Name()
+	}
+	if o.NumReaders == 0 {
+		o.NumReaders = 4
 	}
 
 	var src fetcher
@@ -88,7 +92,7 @@ func (s logReaderSource) Leaves(ctx context.Context, start, end uint64) iter.Seq
 	tsf := func(ctx context.Context) (uint64, error) {
 		return end, nil
 	}
-	bi := client.EntryBundles(ctx, 2, tsf, s.f.ReadEntryBundle, start, end-start)
+	bi := client.EntryBundles(ctx, s.opts.NumReaders, tsf, s.f.ReadEntryBundle, start, end-start)
 	unbundleFn := func(bundle []byte) ([][]byte, error) {
 		eb := &api.EntryBundle{}
 		if err := eb.UnmarshalText(bundle); err != nil {
