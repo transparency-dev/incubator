@@ -36,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"filippo.io/torchwood/mpt"
 	"github.com/cockroachdb/pebble"
 	"github.com/transparency-dev/formats/log"
 	"github.com/transparency-dev/incubator/vindex/api"
@@ -44,7 +45,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
 	"k8s.io/klog/v2"
-	"filippo.io/torchwood/mpt"
 )
 
 const (
@@ -110,12 +110,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		return nil, fmt.Errorf("pebble.Open(): %v", err)
 	}
 
-	// Helpful wrapper to convert Closer to something that can be safely deferred (according to the linter)
-	logClose := func(c io.Closer) {
-		if err := c.Close(); err != nil {
-			klog.Error(err)
-		}
-	}
+
 
 	// Load the compact range we have calculated so far, and the size persisted. We MUST start
 	// from this index in order to have properly verified the state of the input log.
@@ -142,7 +137,7 @@ func NewVerifiableIndex(ctx context.Context, inputLog InputLog, mapFn MapFn, out
 		size = binary.BigEndian.Uint64(sizeBs)
 		crHashes := make([][]byte, len(crBs)/sha256.Size)
 		for i := range crHashes {
-			crHashes[i] = crBs[i*sha256.Size : (i+1)*sha256.Size]
+			crHashes[i] = slices.Clone(crBs[i*sha256.Size : (i+1)*sha256.Size])
 		}
 		klog.V(1).Infof("Loaded compact range state from PebbleDB: size=%d, hashes=%d", size, len(crHashes))
 		cr, err = crf.NewRange(0, size, crHashes)
@@ -654,9 +649,7 @@ func (b *VerifiableIndex) buildMap(ctx context.Context, updateIndex bool) error 
 		}
 		return fmt.Errorf("failed to read latest checkpoint: %v", err)
 	}
-	if err := closer.Close(); err != nil {
-		return fmt.Errorf("failed to close: %v", err)
-	}
+	defer logClose(closer)
 	_, size, _, err := checkpointUnsafe(cpRaw)
 	if err != nil {
 		return fmt.Errorf("failed to parse checkpoint: %v", err)
@@ -783,6 +776,13 @@ func checkpointUnsafe(rawCp []byte) (string, uint64, []byte, error) {
 		return "", 0, nil, fmt.Errorf("failed to decode hash: %v", err)
 	}
 	return origin, size, hash, nil
+}
+
+// Helpful wrapper to convert Closer to something that can be safely deferred (according to the linter)
+func logClose(c io.Closer) {
+	if err := c.Close(); err != nil {
+		klog.Error(err)
+	}
 }
 
 type reporter struct {
