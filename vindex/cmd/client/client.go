@@ -113,7 +113,7 @@ func newVIndexClientFromFlags() *client.VIndexClient {
 	if err != nil {
 		klog.Exitf("failed to construct output log verifier: %v", err)
 	}
-	c, err := client.NewVIndexClient(*vindexBaseURL, inV, outV)
+	c, err := client.NewVIndexClientWithOrigin(*vindexBaseURL, inV, outV, *inLogOrigin)
 	if err != nil {
 		klog.Exitf("failed to construct VIndex Client: %v", err)
 	}
