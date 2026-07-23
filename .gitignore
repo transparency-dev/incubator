@@ -1,0 +1,13 @@
+# Go binaries
+/cmd
+/proxy
+/client
+/ct
+/logandmap
+/sumdbindex
+/sumdbverify
+
+# Go test binaries and coverage/profile outputs
+*.test
+*.out
+*.prof
