@@ -19,6 +19,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
@@ -29,19 +30,24 @@ import (
 
 	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex/client"
+	"github.com/transparency-dev/incubator/vindex/internal/mtc"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
 )
 
 var (
-	vindexBaseURL  = flag.String("vindex_base_url", "", "The base URL of the vindex server.")
-	inLogBaseURL   = flag.String("in_log_base_url", "", "The base URL of the input log.")
-	lookup         = flag.String("lookup", "", "The key to look up in the vindex.")
-	outLogPubKey   = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint. Required.")
-	inLogPubKey    = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint. Required.")
-	inLogPubKeyDER = flag.String("in_log_pub_key_der", "", "For CT logs. The public key to use to verify the input log checkpoint. Required, along with in_log_origin.")
-	inLogOrigin    = flag.String("in_log_origin", "", "Required if in_log_pub_key_der is used. Otherwise, allows the Input Log Origin string to be configured to something other than the public key name.")
-	minIdx         = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
+	vindexBaseURL   = flag.String("vindex_base_url", "", "The base URL of the vindex server.")
+	inLogBaseURL    = flag.String("in_log_base_url", "", "The base URL of the input log.")
+	lookup          = flag.String("lookup", "", "The key to look up in the vindex.")
+	outLogPubKey    = flag.String("out_log_pub_key", "", "The public key to use to verify the output log checkpoint. Required.")
+	inLogPubKey     = flag.String("in_log_pub_key", "", "The public key to use to verify the input log checkpoint. Required.")
+	inLogPubKeyDER  = flag.String("in_log_pub_key_der", "", "For CT logs. The public key to use to verify the input log checkpoint. Required, along with in_log_origin.")
+	inLogOrigin     = flag.String("in_log_origin", "", "Required if in_log_pub_key_der is used. Otherwise, allows the Input Log Origin string to be configured to something other than the public key name. For MTC, this is the checkpoint origin.")
+	inLogKeyName    = flag.String("in_log_key_name", "", "For MTC logs. The key name used in the checkpoint signature. If unset, defaults to in_log_origin.")
+	inLogMTC        = flag.Bool("in_log_mtc", false, "Use MTC verifier for input log.")
+	inLogCosignerID = flag.String("in_log_cosigner_id", "", "For MTC logs. The relative OID of the cosigner.")
+	inLogID         = flag.String("in_log_id", "", "For MTC logs. The relative OID of the log.")
+	minIdx          = flag.Uint64("min_idx", 0, "The minimum index to look up in the input log.")
 )
 
 func main() {
@@ -137,6 +143,38 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 }
 
 func inputLogVerifierFromFlags() note.Verifier {
+	if *inLogMTC {
+		if *inLogPubKey == "" {
+			klog.Exitf("in_log_pub_key must be provided when using --in_log_mtc")
+		}
+		keyName := *inLogKeyName
+		if keyName == "" {
+			keyName = *inLogOrigin
+		}
+		if keyName == "" {
+			klog.Exitf("in_log_key_name (or in_log_origin) must be provided when using --in_log_mtc")
+		}
+		if *inLogCosignerID == "" {
+			klog.Exitf("in_log_cosigner_id must be provided when using --in_log_mtc")
+		}
+		if *inLogID == "" {
+			klog.Exitf("in_log_id must be provided when using --in_log_mtc")
+		}
+		pubKeyBytes, err := base64.StdEncoding.DecodeString(*inLogPubKey)
+		if err != nil {
+			klog.Exitf("failed to decode log_public_key: %v", err)
+		}
+		if len(pubKeyBytes) != ed25519.PublicKeySize {
+			klog.Exitf("invalid log_public_key size: %d, expected %d", len(pubKeyBytes), ed25519.PublicKeySize)
+		}
+		pubKey := ed25519.PublicKey(pubKeyBytes)
+		v, err := mtc.NewMTCVerifier(keyName, pubKey, *inLogCosignerID, *inLogID)
+		if err != nil {
+			klog.Exitf("failed to create MTCVerifier: %v", err)
+		}
+		return v
+	}
+
 	if (*inLogPubKey == "") == (*inLogPubKeyDER == "") {
 		klog.Exitf("Must provide exactly one --in_log_pub_key* flag")
 	}
