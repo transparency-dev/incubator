@@ -111,7 +111,7 @@ func TestVerifiableIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	indices, _, err := client.VerifyLookupResponse(kh, resp, v, v)
+	indices, _, err := client.VerifyLookupResponse(kh, resp, v, v, "")
 	if err != nil {
 		t.Fatalf("failed to verify vindex response: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestVerifiableIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	indices, _, err = client.VerifyLookupResponse(kh, resp, v, v)
+	indices, _, err = client.VerifyLookupResponse(kh, resp, v, v, "")
 	if err != nil {
 		t.Fatalf("failed to verify vindex response: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestVerifiableIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	indices, _, err = client.VerifyLookupResponse(kh, resp, v, v)
+	indices, _, err = client.VerifyLookupResponse(kh, resp, v, v, "")
 	if err != nil {
 		t.Fatalf("failed to verify vindex response: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestVerifiableIndex_concurrency(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				indices, _, err = client.VerifyLookupResponse(kh, resp, v, v)
+				indices, _, err = client.VerifyLookupResponse(kh, resp, v, v, "")
 				if err != nil {
 					return fmt.Errorf("failed to verify vindex response: %v", err)
 				}
@@ -278,7 +278,7 @@ func TestVerifiableIndex_concurrency(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				indices, _, err = client.VerifyLookupResponse(kh, resp, v, v)
+				indices, _, err = client.VerifyLookupResponse(kh, resp, v, v, "")
 				if err != nil {
 					return fmt.Errorf("failed to verify vindex response: %v", err)
 				}

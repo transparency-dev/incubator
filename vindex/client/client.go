@@ -39,7 +39,7 @@ import (
 	"filippo.io/torchwood/mpt"
 )
 
-func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, inV, outV note.Verifier) ([]uint64, []byte, error) {
+func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, inV, outV note.Verifier, inLogOrigin string) ([]uint64, []byte, error) {
 	// Currently the response contains the RFC6962 style response type; leaf, proof, etc.
 	// What if we flip this all around, and the OutputLog part of the response
 	// only returns an index into the output log, and the client has to look up
@@ -72,11 +72,9 @@ func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, in
 	}
 	vindexLeafHash := idxLeafHash.Sum(nil)
 
-	origin := inV.Name()
-	// Hack for sumDB - it's the only major log with a different origin than verifier string.
-	// It's easier to have a special case here, than to route through options to allow overriding.
-	if origin == "sum.golang.org" {
-		origin = "go.sum database tree"
+	origin := inLogOrigin
+	if origin == "" {
+		origin = inV.Name()
 	}
 	ilcp, _, _, err := log.ParseCheckpoint(inCp, origin, inV)
 	if err != nil {
@@ -104,6 +102,13 @@ func VerifyLookupResponse(keyHash [sha256.Size]byte, resp api.LookupResponse, in
 // given base URL, using the supplied verifier to check checkpoint signatures on the output
 // log.
 func NewVIndexClient(vindexUrl string, inV, outV note.Verifier) (*VIndexClient, error) {
+	return NewVIndexClientWithOrigin(vindexUrl, inV, outV, "")
+}
+
+// NewVIndexClientWithOrigin returns a client that can perform verified lookups into the index
+// at the given base URL, using the supplied verifier to check checkpoint signatures on the
+// output log, and the supplied origin to verify the input log checkpoint.
+func NewVIndexClientWithOrigin(vindexUrl string, inV, outV note.Verifier, inLogOrigin string) (*VIndexClient, error) {
 	viu, err := url.Parse(vindexUrl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse URL: %v", err)
@@ -111,16 +116,18 @@ func NewVIndexClient(vindexUrl string, inV, outV note.Verifier) (*VIndexClient, 
 	lookupURL := viu.JoinPath(api.PathLookup)
 
 	return &VIndexClient{
-		lookupURL: lookupURL,
-		inV:       inV,
-		outV:      outV,
+		lookupURL:   lookupURL,
+		inV:         inV,
+		outV:        outV,
+		inLogOrigin: inLogOrigin,
 	}, nil
 }
 
 // VIndexClient allows verified lookups into a verifiable index.
 type VIndexClient struct {
-	lookupURL *url.URL
-	inV, outV note.Verifier
+	lookupURL   *url.URL
+	inV, outV   note.Verifier
+	inLogOrigin string
 }
 
 // Lookup returns all indices, in ascending order, where the given key appears in the Input Log.
@@ -141,7 +148,7 @@ func (c VIndexClient) Lookup(ctx context.Context, key string) ([]uint64, []byte,
 		return nil, nil, fmt.Errorf("lookup failed: %v", err)
 	}
 
-	return VerifyLookupResponse(kh, resp, c.inV, c.outV)
+	return VerifyLookupResponse(kh, resp, c.inV, c.outV, c.inLogOrigin)
 }
 
 func (c VIndexClient) lookupUnverified(ctx context.Context, kh [sha256.Size]byte) (api.LookupResponse, error) {
@@ -166,7 +173,8 @@ func (c VIndexClient) lookupUnverified(ctx context.Context, kh [sha256.Size]byte
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		return lookupResp, fmt.Errorf("got non-200 status code: %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return lookupResp, fmt.Errorf("got non-200 status code: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(resp.Body)
