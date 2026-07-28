@@ -164,6 +164,9 @@ func inputLogVerifierFromFlags() note.Verifier {
 		if err != nil {
 			klog.Exitf("failed to decode log_public_key: %v", err)
 		}
+		// At the moment this is optimized for the Cloudflare bootstrap log.
+		// This will need to be changed to support ML-DSA-44 when we support other MTC logs.
+		// Other changes are also likely to be needed, due to spec evolution since bootstrap launched.
 		if len(pubKeyBytes) != ed25519.PublicKeySize {
 			klog.Exitf("invalid log_public_key size: %d, expected %d", len(pubKeyBytes), ed25519.PublicKeySize)
 		}
