@@ -1,5 +1,5 @@
 # Go binaries
-/cmd
+/tlog-verify
 /proxy
 /client
 /ct
