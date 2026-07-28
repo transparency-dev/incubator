@@ -87,6 +87,8 @@ func newReverseProxy(opts ProxyOpts) *httputil.ReverseProxy {
 			} else if after, ok := strings.CutPrefix(inPath, tlogEntriesPrefix); ok {
 				o := after
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTileDataPrefix, o)
+			} else if strings.HasPrefix(inPath, "/tile/8/") {
+				r.Out.URL.Path = inPath
 			} else if after, ok := strings.CutPrefix(inPath, tlogTilePrefix); ok {
 				o := after
 				r.Out.URL.Path = fmt.Sprintf("%s%s", sumDBTilePrefix, o)
