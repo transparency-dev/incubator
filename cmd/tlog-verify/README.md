@@ -32,56 +32,42 @@ If raw leaf data is provided (`--leaf` or `--leaf-file`), it is hashed using the
 
 ### Example: Go Checksum DB (SumDB)
 
-The Go Checksum DB (`sum.golang.org`) is a transparency log. We can verify that `github.com/transparency-dev/tessera@v1.0.0` is included in it using the saved proof in `testdata/tessera-v1.0.0.tlog-proof`.
+The Go Checksum DB (`sum.golang.org`) is a transparency log. You can use the [Woodpecker Web](../../woodpecker-web) viewer to browse the log and export proof and leaf files.
+
+For example, for entry `#43930254` (which contains `github.com/transparency-dev/tessera@v1.0.0`), you can export:
+1.  The proof bundle: `go.sum-database-tree-43930254.tlog-proof`
+2.  The raw leaf file: `go.sum-database-tree-43930254.raw`
+
+For convenience, these files are checked into the repository in the `testdata` directory.
 
 The public key for `sum.golang.org` is:
 `sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8`
 
 Since Go SumDB uses `go.sum database tree` as the origin name in its checkpoints (which differs from the key name `sum.golang.org`), we must pass the `--origin` flag.
 
+#### Verification using raw leaf file (Recommended)
+
+This verifies that the actual content of the leaf matches what is in the log:
+
+```shell
+go run ./cmd/tlog-verify \
+  --log-key "sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8" \
+  --origin "go.sum database tree" \
+  --leaf-file cmd/tlog-verify/testdata/go.sum-database-tree-43930254.raw \
+  cmd/tlog-verify/testdata/go.sum-database-tree-43930254.tlog-proof
+```
+
 #### Verification using pre-computed leaf hash
 
-The RFC6962 leaf hash for the Tessera entry is:
-*   Hex: `0fa57c511c3b2ffcc0a05ad63172568d265aaf9844e9b636a0978795396f2ab1`
-*   Base64: `D6V8URw7L/zAoFrWMXJWjSZar5hE6bY2oJeHlTlvKrE=`
+This only verifies that the hash is present in the log (it does not verify the leaf content):
+
+The RFC6962 leaf hash for this Tessera entry is `D6V8URw7L/zAoFrWMXJWjSZar5hE6bY2oJeHlTlvKrE=` (base64).
 
 ```shell
 go run ./cmd/tlog-verify \
   --log-key "sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8" \
   --origin "go.sum database tree" \
   --leaf-hash "D6V8URw7L/zAoFrWMXJWjSZar5hE6bY2oJeHlTlvKrE=" \
-  cmd/tlog-verify/testdata/tessera-v1.0.0.tlog-proof
-```
-
-#### Verification using raw leaf data
-
-The raw leaf data in SumDB for this entry is:
-```
-github.com/transparency-dev/tessera v1.0.0 h1:4OT1V9xJLa5NnYlFWWlCdZkCm18/o12rdd+bCTje7XE=
-github.com/transparency-dev/tessera v1.0.0/go.mod h1:TLvfjlkbmsmKVEJUtzO2eb9Q2IBnK3EJ0dI4G0oxEOU=
-```
-Note: The data must include the trailing newline.
-
-Using `--leaf` with literal newlines in quotes (to prevent shell from stripping the trailing newline):
-```shell
-go run ./cmd/tlog-verify \
-  --log-key "sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8" \
-  --origin "go.sum database tree" \
-  --leaf "github.com/transparency-dev/tessera v1.0.0 h1:4OT1V9xJLa5NnYlFWWlCdZkCm18/o12rdd+bCTje7XE=
-github.com/transparency-dev/tessera v1.0.0/go.mod h1:TLvfjlkbmsmKVEJUtzO2eb9Q2IBnK3EJ0dI4G0oxEOU=
-" \
-  cmd/tlog-verify/testdata/tessera-v1.0.0.tlog-proof
-```
-
-Or using `--leaf-file`:
-```shell
-# Create a file containing the raw leaf data (including the trailing newline)
-printf "github.com/transparency-dev/tessera v1.0.0 h1:4OT1V9xJLa5NnYlFWWlCdZkCm18/o12rdd+bCTje7XE=\ngithub.com/transparency-dev/tessera v1.0.0/go.mod h1:TLvfjlkbmsmKVEJUtzO2eb9Q2IBnK3EJ0dI4G0oxEOU=\n" > /tmp/leaf.txt
-
-go run ./cmd/tlog-verify \
-  --log-key "sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8" \
-  --origin "go.sum database tree" \
-  --leaf-file /tmp/leaf.txt \
-  cmd/tlog-verify/testdata/tessera-v1.0.0.tlog-proof
+  cmd/tlog-verify/testdata/go.sum-database-tree-43930254.tlog-proof
 ```
 

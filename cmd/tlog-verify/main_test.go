@@ -30,7 +30,7 @@ const (
 )
 
 func TestVerifyProof(t *testing.T) {
-	proofPath := filepath.Join("testdata", "tessera-v1.0.0.tlog-proof")
+	proofPath := filepath.Join("testdata", "go.sum-database-tree-43930254.tlog-proof")
 	proofBytes, err := os.ReadFile(proofPath)
 	if err != nil {
 		t.Fatalf("failed to read test proof file: %v", err)
@@ -166,11 +166,14 @@ func TestDecodeLeafHash(t *testing.T) {
 }
 
 func TestVerifyProofWithRawLeaf(t *testing.T) {
-	// Tessera raw leaf data
-	rawLeaf := []byte("github.com/transparency-dev/tessera v1.0.0 h1:4OT1V9xJLa5NnYlFWWlCdZkCm18/o12rdd+bCTje7XE=\ngithub.com/transparency-dev/tessera v1.0.0/go.mod h1:TLvfjlkbmsmKVEJUtzO2eb9Q2IBnK3EJ0dI4G0oxEOU=\n")
+	rawLeafPath := filepath.Join("testdata", "go.sum-database-tree-43930254.raw")
+	rawLeaf, err := os.ReadFile(rawLeafPath)
+	if err != nil {
+		t.Fatalf("failed to read test raw leaf file: %v", err)
+	}
 	computedHash := rfc6962.DefaultHasher.HashLeaf(rawLeaf)
 
-	proofPath := filepath.Join("testdata", "tessera-v1.0.0.tlog-proof")
+	proofPath := filepath.Join("testdata", "go.sum-database-tree-43930254.tlog-proof")
 	proofBytes, err := os.ReadFile(proofPath)
 	if err != nil {
 		t.Fatalf("failed to read test proof file: %v", err)
