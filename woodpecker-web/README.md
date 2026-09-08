@@ -26,9 +26,20 @@ The tiles are expected to be formatted as a stream of Length-Value Payloads (LVP
 - **Entry Browser**: Lists entries with their index and size.
 - **Jump to Index**: Quickly navigate to a specific entry by index.
 - **Detail Modal**: Inspect entries in both interpreted (text/JSON) and raw hex formats.
+- **Proof Exporter**: Generate and export a `tlog-proof` bundle for any entry, with a copyable verification command for `tlog-verify`.
 
 ### For Log Operators
 - **Customizable**: Contains a `LOG_CUSTOMIZER` object in the script to allow custom rendering of log entries to fit your specific log schema.
+
+## Offline Proof Verification
+
+While Woodpecker Web is a convenient tool for browsing log entries, it runs in the browser and does not perform cryptographic verification of the log's integrity or the inclusion of entries.
+
+For security-sensitive operations, you can export a `tlog-proof` bundle for any entry and verify it offline.
+
+![Screenshot of Woodpecker Web Proof Export](./woodpecker-web-proof.png)
+
+The export dialog allows you to download both the `tlog-proof` bundle and the raw leaf data file. The proof can then be verified offline using the [tlog-verify](../cmd/tlog-verify) command-line tool. The dialog provides the exact command-line invocation to verify the proof using either the downloaded leaf file (recommended, as it verifies the actual content) or the pre-computed leaf hash.
 
 ## Usage
 Copy `index.html` to the root of your `tlog-tiles` directory (next to `./checkpoint`, `./tile`, etc.). Customize the leaf renderer if viewing the bytes as a string isn't what you want.
