@@ -253,6 +253,17 @@
                 document.getElementById('sidebar-overlay').classList.toggle('hidden', !this.state.sidebarOpen);
             },
 
+            getTargetIndexFromHash() {
+                const hash = window.location.hash;
+                if (hash) {
+                    const match = hash.match(/^#?(?:entry-)?(\d+)$/);
+                    if (match) {
+                        return parseInt(match[1], 10);
+                    }
+                }
+                return null;
+            },
+
             async refresh() {
                 this.updateStatus('fetching', 'Pecking...');
                 try {
@@ -261,8 +272,15 @@
                     const text = await response.text();
                     this.parseCheckpoint(text);
                     this.updateStatus('success', 'Synchronized');
-                    const lastTileIndex = Math.floor((this.state.treeSize - 1) / this.config.tileSize);
-                    if (lastTileIndex >= 0) this.fetchTile(lastTileIndex);
+
+                    const targetIndex = this.getTargetIndexFromHash();
+                    if (targetIndex !== null && targetIndex < this.state.treeSize) {
+                        const tileIdx = Math.floor(targetIndex / this.config.tileSize);
+                        this.fetchTile(tileIdx, targetIndex);
+                    } else {
+                        const lastTileIndex = Math.floor((this.state.treeSize - 1) / this.config.tileSize);
+                        if (lastTileIndex >= 0) this.fetchTile(lastTileIndex);
+                    }
                 } catch (e) {
                     this.log(`Sync Failed: ${e.message}`, true);
                     this.updateStatus('error', 'Log Error');
@@ -501,6 +519,13 @@
                             const tileIdx = Math.floor(val / this.config.tileSize);
                             this.fetchTile(tileIdx, val);
                         }
+                    }
+                });
+                window.addEventListener('hashchange', () => {
+                    const targetIndex = this.getTargetIndexFromHash();
+                    if (targetIndex !== null && targetIndex < this.state.treeSize) {
+                        const tileIdx = Math.floor(targetIndex / this.config.tileSize);
+                        this.fetchTile(tileIdx, targetIndex);
                     }
                 });
             }

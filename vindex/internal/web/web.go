@@ -29,6 +29,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
+//go:embed index.html
+var indexHTML []byte
+
 func NewServer(lookup func(context.Context, [sha256.Size]byte) (api.LookupResponse, error)) Server {
 	return Server{
 		lookup: lookup,
@@ -72,7 +75,22 @@ func (s Server) HandleLookup(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s Server) HandleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/vindex" {
+		http.Redirect(w, r, "/vindex/", http.StatusMovedPermanently)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(indexHTML); err != nil {
+		klog.Warningf("failed to write index HTML: %v", err)
+	}
+}
+
 func (s Server) RegisterHandlers(r *mux.Router) {
 	r.HandleFunc("/vindex/lookup/{hash}", s.HandleLookup).Methods("GET")
+	r.HandleFunc("/vindex", s.HandleIndex).Methods("GET")
+	r.HandleFunc("/vindex/", s.HandleIndex).Methods("GET")
+	r.HandleFunc("/vindex/index.html", s.HandleIndex).Methods("GET")
 	r.Handle("/metrics", promhttp.Handler())
 }

@@ -25,6 +25,7 @@ The tiles are expected to be formatted as a stream of Length-Value Payloads (LVP
 - **Checkpoint Inspector**: View the raw checkpoint and signatures.
 - **Entry Browser**: Lists entries with their index and size.
 - **Jump to Index**: Quickly navigate to a specific entry by index.
+- **Direct Linking**: Link directly to a specific entry by appending `#entry-<index>` or `#<index>` to the URL (e.g., `index.html#entry-123`).
 - **Detail Modal**: Inspect entries in both interpreted (text/JSON) and raw hex formats.
 
 ### For Log Operators

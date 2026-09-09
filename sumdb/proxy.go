@@ -28,6 +28,7 @@ import (
 	"io"
 
 	"k8s.io/klog/v2"
+	woodpeckerweb "github.com/transparency-dev/incubator/woodpecker-web"
 )
 
 const (
@@ -48,10 +49,6 @@ type ProxyOpts struct {
 	// distributor.
 	// https://github.com/transparency-dev/distributor/
 	WitnessSigs uint
-
-	// IndexFile is the local path to an index.html file to serve at the log root /index.html.
-	// If empty, nothing is served at /index.html.
-	IndexFile string
 }
 
 func newReverseProxy(opts ProxyOpts) *httputil.ReverseProxy {
@@ -118,21 +115,19 @@ func newReverseProxy(opts ProxyOpts) *httputil.ReverseProxy {
 	return proxy
 }
 
-// NewProxy returns an http.Handler that proxies to the appropriate SumDB upstream.
-// If IndexFile is set in ProxyOpts, it also serves this file at /index.html.
 func NewProxy(opts ProxyOpts) http.Handler {
 	proxy := newReverseProxy(opts)
-
-	if opts.IndexFile == "" {
-		return proxy
-	}
 
 	prefix, _ := strings.CutSuffix(opts.PathPrefix, "/")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		inPath := strings.TrimPrefix(r.URL.Path, prefix)
 		if inPath == "/index.html" || inPath == "/" {
-			http.ServeFile(w, r, opts.IndexFile)
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write(woodpeckerweb.IndexHTML); err != nil {
+				klog.Warningf("failed to write index HTML: %v", err)
+			}
 			return
 		}
 		proxy.ServeHTTP(w, r)
