@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -380,6 +381,9 @@ func reportVersion(ctx context.Context, modRoot string, goModPath string, modNam
 		subdir = ""
 	}
 	if err := zip.CreateFromVCS(f, modVer, modRoot, hash.String(), subdir); err != nil {
+		if diagErr := diagnoseGitError(modRoot); diagErr != nil {
+			return report, fmt.Errorf("failed to create zip file: %v (diagnostics: %v)", err, diagErr)
+		}
 		return report, fmt.Errorf("failed to create zip file: %v", err)
 	}
 	report.gitZipHash, err = dirhash.HashZip(f.Name(), dirhash.Hash1)
@@ -508,3 +512,20 @@ func newInputLogClientFromFlags() *client.InputLogClient {
 	}
 	return c
 }
+
+// diagnoseGitError checks if the git command fails due to ownership issues
+// and returns a helpful error if so.
+func diagnoseGitError(dir string) error {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrStr := stderr.String()
+		if strings.Contains(stderrStr, "detected dubious ownership") {
+			return errors.New(strings.TrimSpace(stderrStr))
+		}
+	}
+	return nil
+}
+
