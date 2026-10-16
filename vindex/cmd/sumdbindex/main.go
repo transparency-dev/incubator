@@ -123,10 +123,11 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	sumProxy := sumdb.NewProxy(sumdb.ProxyOpts{
+	sumProxyOpts := sumdb.ProxyOpts{
 		PathPrefix:  "/inputlog/",
 		WitnessSigs: *witnessSigs,
-	})
+	}
+	sumProxy := sumdb.NewProxy(sumProxyOpts)
 
 	outputLog, outputCloser := outputLogOrDie(ctx, outputLogDir)
 	defer func() {
@@ -300,3 +301,4 @@ func mapFn(data []byte) [][32]byte {
 
 	return [][32]byte{sha256.Sum256(data[:modEnd])}
 }
+

@@ -51,6 +51,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"golang.org/x/mod/sumdb/note"
 	"k8s.io/klog/v2"
+	woodpeckerweb "github.com/transparency-dev/incubator/woodpecker-web"
 )
 
 var (
@@ -311,8 +312,8 @@ func submitEntries(ctx context.Context, appender *tessera.Appender) {
 func runWebServer(vi *vindex.VerifiableIndex, inLogDir, outLogDir string) (func(context.Context) error, error) {
 	srv := web.NewServer(vi.Lookup)
 
-	ilfs := http.FileServer(http.Dir(inLogDir))
-	olfs := http.FileServer(http.Dir(outLogDir))
+	ilfs := serveLogWithWoodpecker(inLogDir, woodpeckerweb.IndexHTML)
+	olfs := serveLogWithWoodpecker(outLogDir, woodpeckerweb.IndexHTML)
 	r := mux.NewRouter()
 	r.PathPrefix("/inputlog/").Handler(http.StripPrefix("/inputlog/", ilfs))
 	r.PathPrefix("/outputlog/").Handler(http.StripPrefix("/outputlog/", olfs))
@@ -405,3 +406,19 @@ func mapFnFromFlags() vindex.MapFn {
 	}
 	return mapFn
 }
+
+func serveLogWithWoodpecker(logDir string, woodpeckerHTML []byte) http.Handler {
+	fs := http.FileServer(http.Dir(logDir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write(woodpeckerHTML); err != nil {
+				klog.Warningf("failed to write index HTML: %v", err)
+			}
+			return
+		}
+		fs.ServeHTTP(w, r)
+	})
+}
+
