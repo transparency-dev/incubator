@@ -141,7 +141,8 @@ While `Output_CP.Size == 0`, lookup endpoints remain `503 Service Unavailable` a
 VIndex separates lightweight client query checks from full-log construction verification:
 
 1. **Lookup Client Verification**: Authenticates individual `/keys` and `/values` responses offline against `<output-log-origin>`, the client's Output Log checkpoint verification policy, `<input-log-origin>`, and the caller's required `from` coverage horizon, proving soundness and completeness relative to the witnessed `mpt-root` without trusting the HTTP server.
-2. **Full-Log Independent Auditor**: Continuously tails the Output Log from entry `0`, verifies Output Log and Input Log checkpoint policies and Merkle consistency, downloads and authenticates Input Log entries starting from `from` (`[from, input_size)`), independently executes the mapping function, and verifies every published `mpt-root`. On any `mpt-root` mismatch or protocol violation, the auditor halts and alerts without advancing past its last verified commitment.
+2. **Full-Log Independent Auditor**: Continuously tails the Output Log from entry `0`, verifies Output Log and Input Log checkpoints and Merkle consistency, downloads and authenticates Input Log entries starting from `from` (`[from, input_size)`), independently executes the mapping function, and verifies every published `mpt-root`. On any `mpt-root` mismatch or protocol violation, the auditor halts and alerts without advancing past its last verified commitment.
+3. **Black-Box Conformance & Load Harness ([Hammer](../internal/hammer/README.md))**: Hosts a synthetic `tlog-tiles` Input Log and evaluates mapping functions natively in pure Go (with zero WebAssembly or `vindexd` coupling), benchmarking any local or third-party `tlog-vindex` implementation over HTTP for ingestion lag, query latency, ground-truth key/index accuracy, Output Log tile consistency, and edge-case HTTP status conformance.
 
 ---
 

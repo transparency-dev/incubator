@@ -89,4 +89,4 @@ The VIndex topology bounds search indexing between two append-only logs, a struc
 - [**Read Serving & Query Endpoints**](./internal/server/README.md): `<index-url>/keys` and `<index-url>/values` HTTP handlers, prefix policy guardrails, and reader snapshot isolation.
 - [**Coordinator & Lifecycle Engine**](./internal/coordinator/README.md): Sync-cycle orchestration, checkpoint ratcheting, Genesis Backfill, and Zero-WAL startup recovery.
 - [**Independent Log Auditor**](./internal/auditor/README.md): Continuous Output Log tailing, independent Input Log replay, and divergence alerting.
-- [**Hammer Load Testing & Verification**](./internal/hammer/README.md): Synthetic workload generation and continuous end-to-end lookup verification.
+- [**Hammer Conformance & Load-Testing Harness**](./internal/hammer/README.md): Implementation-agnostic `tlog-tiles` / `tlog-vindex` benchmark, pure-Go mapping oracle, and protocol conformance checker.
