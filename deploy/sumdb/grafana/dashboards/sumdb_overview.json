@@ -1,0 +1,1025 @@
+{
+  "uid": "vindex-sumdb-overview",
+  "title": "VIndex - SumDB Personality Overview",
+  "tags": [
+    "vindex",
+    "sumdb"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "fiscalYearStartMonth": 0,
+  "liveNow": true,
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Pipeline Overview \u0026 Checkpoint Ratchets",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 1,
+      "targets": [
+        {
+          "expr": "vindex_input_tree_size",
+          "refId": "A"
+        }
+      ],
+      "title": "Input Log Tip Size",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "targets": [
+        {
+          "expr": "vindex_kv_committed_size",
+          "refId": "A"
+        }
+      ],
+      "title": "KV Committed Size",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "targets": [
+        {
+          "expr": "vindex_output_tree_size",
+          "refId": "A"
+        }
+      ],
+      "title": "Output Tree Size",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "targets": [
+        {
+          "expr": "vindex_serving_tree_size",
+          "refId": "A"
+        }
+      ],
+      "title": "Serving Tree Size",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 5,
+      "targets": [
+        {
+          "expr": "vindex_input_tree_size",
+          "legendFormat": "1. Input Log Tip",
+          "refId": "A"
+        },
+        {
+          "expr": "vindex_kv_committed_size",
+          "legendFormat": "2. KV Committed (m_kv_size)",
+          "refId": "B"
+        },
+        {
+          "expr": "vindex_serving_tree_size",
+          "legendFormat": "3. Serving Input Size",
+          "refId": "C"
+        }
+      ],
+      "title": "Checkpoint Progression (All Ratchets)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "lineInterpolation": "linear",
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 6,
+      "targets": [
+        {
+          "expr": "vindex_ingestion_lag",
+          "legendFormat": "Ingestion Lag (Input - KV)",
+          "refId": "A"
+        },
+        {
+          "expr": "vindex_indexing_lag",
+          "legendFormat": "Commit Lag (KV - Serving)",
+          "refId": "B"
+        }
+      ],
+      "title": "Pipeline Inter-stage Lags (Leaves)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "lineInterpolation": "linear",
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Stage 1: Ingestion \u0026 WASM Mapping",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 200,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 7,
+      "targets": [
+        {
+          "expr": "rate(vindex_leaves_downloaded_total[1m])",
+          "legendFormat": "Downloaded (leaves/s)",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(vindex_leaves_mapped_total[1m])",
+          "legendFormat": "Mapped (leaves/s)",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(vindex_leaves_indexed_total[1m])",
+          "legendFormat": "Indexed (leaves/s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Throughput by Stage (leaves/sec)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 8,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_map_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "MapFn p99 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(vindex_map_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "MapFn p90 (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vindex_map_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "MapFn p50 (s)",
+          "refId": "C"
+        }
+      ],
+      "title": "WASM Map Duration (per 256-leaf Bundle)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 9,
+      "targets": [
+        {
+          "expr": "rate(vindex_input_fetch_errors_total[1m])",
+          "legendFormat": "Input Fetch Errors /s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (policy) (rate(vindex_map_errors_total[1m]))",
+          "legendFormat": "Map Errors (policy={{policy}}) /s",
+          "refId": "B"
+        }
+      ],
+      "title": "Ingestion Fetch \u0026 Map Errors (/sec)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "id": 10,
+      "targets": [
+        {
+          "expr": "vindex_tile_cache_bytes",
+          "refId": "A"
+        }
+      ],
+      "title": "Tile Cache Disk Usage",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 11,
+      "targets": [
+        {
+          "expr": "rate(vindex_keys_mapped_total[1m])",
+          "legendFormat": "Search Keys Emitted /s",
+          "refId": "A"
+        }
+      ],
+      "title": "WASM Keys Mapped Rate (/sec)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 12,
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=\"vindexd\"}",
+          "legendFormat": "Resident Memory (RSS)",
+          "refId": "A"
+        }
+      ],
+      "title": "Process Memory (RSS)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Stage 2: Storage \u0026 Pebble Commit",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 300,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 13,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_pebble_apply_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "Pebble Apply p99 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(vindex_pebble_apply_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "Pebble Apply p90 (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vindex_pebble_apply_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "Pebble Apply p50 (s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Pebble Batch Apply Duration",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 27
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 14,
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=\"vindexd\"}[1m])",
+          "legendFormat": "CPU Cores Used",
+          "refId": "A"
+        },
+        {
+          "expr": "go_goroutines{job=\"vindexd\"}",
+          "legendFormat": "Active Goroutines",
+          "refId": "B"
+        }
+      ],
+      "title": "Process CPU \u0026 Goroutines",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 27
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Active Goroutines"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Stage 3: Output Log, MPT \u0026 Witnessing",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "id": 400,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 15,
+      "targets": [
+        {
+          "expr": "vindex_witness_signatures_count",
+          "refId": "A"
+        }
+      ],
+      "title": "Witness Signatures",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 36
+      },
+      "repeatDirection": "h",
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "wideLayout": true,
+        "showPercentChange": false,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "percentChangeColorMode": "standard",
+        "orientation": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 16,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_witness_wait_seconds_bucket[1m])) by (le))",
+          "legendFormat": "Witness Wait p99 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vindex_witness_wait_seconds_bucket[1m])) by (le))",
+          "legendFormat": "Witness Wait p50 (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "rate(vindex_witness_errors_total[1m])",
+          "legendFormat": "Witness Errors /s",
+          "refId": "C"
+        }
+      ],
+      "title": "Witness Latency \u0026 Signing Errors",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 4,
+        "y": 36
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 17,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_mpt_write_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "MPT Write p99 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_mpt_lock_wait_seconds_bucket[1m])) by (le))",
+          "legendFormat": "MPT Lock Wait p99 (s)",
+          "refId": "B"
+        }
+      ],
+      "title": "MPT Mutation Duration \u0026 Lock Wait",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 36
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "row",
+      "collapsed": false,
+      "title": "Query Serving \u0026 Lookup API",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 500,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 18,
+      "targets": [
+        {
+          "expr": "rate(vindex_lookup_latency_seconds_count[1m])",
+          "legendFormat": "Lookup QPS",
+          "refId": "A"
+        }
+      ],
+      "title": "Lookup Request Rate (QPS)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 45
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 19,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_lookup_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p99 (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vindex_lookup_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95 (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vindex_lookup_latency_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50 (s)",
+          "refId": "C"
+        }
+      ],
+      "title": "Lookup Response Latency",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 45
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 20,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(vindex_lookup_results_returned_bucket[1m])) by (le))",
+          "legendFormat": "Matched Leaves p99",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vindex_lookup_results_returned_bucket[1m])) by (le))",
+          "legendFormat": "Matched Leaves p50",
+          "refId": "B"
+        }
+      ],
+      "title": "Matched Leaves Distribution (Per Query)",
+      "transparent": false,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 45
+      },
+      "repeatDirection": "h",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true,
+          "calcs": []
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {}
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "templating": {},
+  "annotations": {}
+}
