@@ -38,21 +38,21 @@ A verifiable index allows clients to look up which entries in an existing append
 
 The index operator applies a deterministic _mapping function_ to each entry in the input log to extract zero or more _canonical keys_. For each key, the index maintains an [RFC 6962][] Merkle tree (the key's _value log_) over the ascending sequence of input log _entry indices_ at which that key appeared. The 32-byte roots of all non-empty value logs (each a _value log root_, `value_root`) are stored in a path-compressed binary Merkle Patricia Trie (_MPT_).
 
-Rather than signing standalone map checkpoints, the index operator publishes each _index state commitment_ (`c2sp.org/tlog-vindex-state@v1`)—binding the MPT's 32-byte root hash (`mpt-root`), a commitment to the mapping function (`map-fn`), the indexed _start index_ (`from`), and a signed input log [checkpoint][]—as an entry in a [tiled transparency log][tlog-tiles] (the _output log_) witnessed according to [tlog-witness][]. Lookup clients verify query responses offline against witnessed output log checkpoints, while monitors and auditors can deterministically replay the input log to verify every state commitment in the output log.
+Rather than signing standalone map checkpoints, the index operator publishes each _index state commitment_ (`c2sp.org/tlog-vindex-state@v1`). This binds the input log origin (`input-origin`), the indexed entry range `[from, input_size)`, the input log root hash (`input-root`), and the resulting 32-byte MPT root hash (`mpt-root`) as an entry in a [tiled transparency log][tlog-tiles] (the _output log_) witnessed according to [tlog-witness][]. Lookup clients verify query responses offline against witnessed output log checkpoints, while monitors and auditors can deterministically replay the input log to verify every state commitment in the output log.
 
 ## Parameters
 
 A verifiable index is defined by:
 
-- an _input log_, parameterized by its [checkpoint][] origin and [tlog-policy][], along with an entry retrieval mechanism that defines how clients and auditors fetch and authenticate input log entries against the input log checkpoint root hash (such as [tlog-tiles][] or [static-ct-api][]);
+- an _input log_, parameterized by its [checkpoint][] origin (`<input-log-origin>`). Auditors and clients that fetch entries from the input log additionally require the input log's checkpoint verification policy and entry retrieval mechanism (such as [tlog-tiles][] or [static-ct-api][]);
 
 - a _start index_ (`from`), the first input log entry index covered by the verifiable index (`0` when indexing from the start of the input log, or a positive integer when indexing a suffix of an existing input log);
 
-- an _output log_, which is a [tiled transparency log][tlog-tiles] parameterized by its URL prefix (`<output-log-url>`) and its [tlog-policy][];
+- an _output log_, which is a [tiled transparency log][tlog-tiles] parameterized by its [checkpoint][] origin (`<output-log-origin>`), its checkpoint verification policy, and its URL prefix (`<output-log-url>`);
 
 - an _index URL_ (`<index-url>`), the base URL serving the `/keys` and `/values` HTTP lookup endpoints defined in this document; and
 
-- a deterministic _mapping function_ that maps a raw input log entry to a set of canonical keys, identified by a 32-byte SHA-256 commitment digest (`map-fn`) distributed out-of-band alongside the input and output log policies.
+- a deterministic _mapping function_ that maps a raw input log entry to a set of canonical keys.
 
 An operator MAY use the same base URL for both `<output-log-url>` and `<index-url>`.
 
@@ -113,7 +113,7 @@ The MPT over a set of `(key, value_root)` pairs is the unique path-compressed bi
 - If the set contains a single pair `(key, value_root)`, the trie is a single MPT leaf node.
 - If the set contains two or more keys, let `b` be the minimum `split_bit(x, y)` across all pairs of distinct keys in the set. The root of the subtree is an inner node with split bit `b`, whose left child is the MPT over all keys in the set with `bit(key, b) = 0` and whose right child is the MPT over all keys in the set with `bit(key, b) = 1`.
 
-Because the topology is uniquely determined by the set of present keys and their value log roots, the root hash of the MPT (`mpt_root`) is independent of the order in which keys are inserted or updated. Moreover, when keys are sorted in lexicographical order, the minimum `split_bit(x, y)` in any key range is the minimum `split_bit` between adjacent keys, allowing the root hash of the MPT (or of any prefix subtree) to be computed in `O(n)` time in a single pass.
+Because the topology is uniquely determined by the set of present keys and their value log roots, the root hash of the MPT (`mpt_root`) is independent of the order in which keys are inserted or updated. Moreover, when keys are sorted in lexicographical order, the minimum `split_bit(x, y)` in any key range is the minimum `split_bit` between adjacent keys, allowing the root hash of the MPT (or of any prefix subtree) to be computed in a single pass over the sorted keys.
 
 #### Node hashing
 
@@ -141,45 +141,42 @@ mpt_inner_hash(b, left, right) = SHA-256(0x01 || uvarint(b) || left || right)
 
 ### Output log entries
 
-Each entry in the output log is an _index state commitment_ over an input log entry range `[from, input_size)`:
+Each entry in the output log is an _index state commitment_ over an input log entry range `[from, input_size)` consisting of exactly six newline-terminated lines:
 
 ```
 c2sp.org/tlog-vindex-state@v1
-mpt-root <base64-mpt-root>
-map-fn <base64-map-fn-sha256>
+input-origin <input-log-origin>
 from <decimal-start-index>
-
-<input-log-checkpoint>
+input-size <decimal-input-size>
+input-root <base64-input-root>
+mpt-root <base64-mpt-root>
 ```
 
 The first line MUST be the string `c2sp.org/tlog-vindex-state@v1`.
 
-The second line MUST start with the string `mpt-root` followed by a space (U+0020) and the base64 encoding of the 32-byte MPT root hash (`mpt_root`).
+The second line MUST start with `input-origin` followed by a single space (U+0020) and the input log's [checkpoint][] origin string (`<input-log-origin>`, a non-empty printable ASCII string in `0x20..0x7E` with no leading or trailing spaces; `<input-log-origin>` itself MAY contain internal spaces). The `input-origin` value MUST remain constant across all entries in a given output log.
 
-The third line MUST start with the string `map-fn` followed by a space (U+0020) and the base64 encoding of the 32-byte SHA-256 commitment to the mapping function that produced `mpt_root`. The mapping function commitment MUST remain constant across all entries in a given output log. Lookup clients that do not pin a specific mapping function digest MUST validate the syntactic format of this line and MAY ignore its value.
+The third line MUST start with `from` followed by a single space (U+0020) and the starting input log entry index (inclusive), encoded as an ASCII decimal. The start index MUST be less than or equal to `input-size` (`0 <= from <= input_size`) and MUST remain constant across all entries in a given output log (typically `0` when indexing from the start of the input log).
 
-> [!NOTE]
-> **TODO (pre-1.0)**: Decide whether the `map-fn` preimage is the raw compiled `.wasm` module bytecode directly, or a canonical provenance/build manifest (`{source repo @ tag, build toolchain, output wasm hash}`) committing to both the source definition and compiled artifact.
+The fourth line MUST start with `input-size` followed by a single space (U+0020) and the tree size (`input_size`) of the indexed input log [checkpoint][], encoded as an ASCII decimal.
 
-The fourth line MUST start with the string `from` followed by a space (U+0020) and the starting input log entry index (inclusive), encoded as an ASCII decimal. The start index MUST be less than or equal to the tree size (`input_size`) of the embedded input log checkpoint and MUST remain constant across all entries in a given output log (typically `0` when indexing from the start of the input log).
+The fifth line MUST start with `input-root` followed by a single space (U+0020) and the base64 encoding of the 32-byte Merkle Tree Hash (`input_root`) of the indexed input log [checkpoint][] at `input_size`. Any extension lines or signatures present on the input log checkpoint are omitted from `state_entry`.
 
-After the `from` line and an empty line, the signed input log [checkpoint][] is included verbatim, ending with a single trailing newline (U+000A).
+The sixth line MUST start with `mpt-root` followed by a single space (U+0020) and the base64 encoding of the 32-byte MPT root hash (`mpt_root`) derived from the input log entries in `[from, input_size)`.
 
-The output log entry (`state_entry`) is hashed into the output log's Merkle tree according to [RFC 6962, Section 2.1][] (`SHA-256(0x00 || state_entry)`).
+Decoders MUST reject a `c2sp.org/tlog-vindex-state@v1` entry if it contains fewer or more than six lines, or any trailing data after the sixth newline (U+000A).
+
+The output log entry (`state_entry`) is hashed into the output log's Merkle tree according to [RFC 6962, Section 2.1][] (`SHA-256(0x00 || state_entry)`). Index operators SHOULD retain the signed input log [checkpoint][] corresponding to each published output log entry so they can demonstrate input log equivocation out-of-band if an auditor observes a conflicting input log root at `input_size`.
 
 Example output log entry:
 
 ```
 c2sp.org/tlog-vindex-state@v1
-mpt-root UFxpN2pP0tW3wQ5xlaluI6r0iIjoc08s2nFK+nnL1uE=
-map-fn kElQ2l5Fh62m98WyOGdrXVXnWRtByCf97CCrlK4XCQk=
+input-origin example.com/inputlog
 from 0
-
-example.com/inputlog
-98765
-lxDZaupAJAxWNRnEK4esZKdB8d/Lq+JZGw+GBWCUK58=
-
-— example.com/inputlog Az3grlgtzPICa5OS8npVmf1Myq/5IZniMp+ZJurmRDeOoRDe4URYN7u5/Zhcyv2q1gGzGku9nTo+zyWE+xeMcTOAYQ8=
+input-size 98765
+input-root lxDZaupAJAxWNRnEK4esZKdB8d/Lq+JZGw+GBWCUK58=
+mpt-root UFxpN2pP0tW3wQ5xlaluI6r0iIjoc08s2nFK+nnL1uE=
 ```
 
 ## HTTP Interface
@@ -188,7 +185,7 @@ A verifiable index exposes two HTTP GET lookup endpoints under `<index-url>`, al
 
 The endpoints defined in this section MUST NOT serve redirect (`3xx`) responses. If a server has not yet published its first output log checkpoint, or receives a `values` request with `before` greater than its currently indexed input log tree size, it MUST respond with a "503 Service Unavailable" HTTP status code.
 
-`<index-url>/keys` is mutable (returning the latest output log state commitment), so its HTTP headers SHOULD prevent caching beyond a few seconds. Once a server has indexed input log entries at least up to `before`, `<index-url>/values?key=<key>&before=<before>[&limit=<limit>]` is deterministic for a fixed server page-boundary policy, so its caching headers MAY be long-lived.
+`<index-url>/keys` is mutable (returning the latest output log state commitment), so its HTTP headers SHOULD prevent caching beyond a few seconds. Once a server has indexed input log entries at least up to `before`, `<index-url>/values?key=<key>&before=<before>` is deterministic for a fixed server page-boundary policy, so its caching headers MAY be long-lived.
 
 ### keys
 
@@ -202,7 +199,7 @@ A request MUST specify either the `key` query parameter or the `prefix` query pa
 - `key` specifies an exact key lookup: the server proves whether `<key>` exists in the MPT and, if present, returns its `<key> <base64-value-root>` pair.
 - `prefix` specifies a key prefix lookup: the server proves and returns all `(key, value_root)` pairs in the MPT whose key has `<key-prefix>` as a byte prefix.
 
-The `<key>` or `<key-prefix>` parameter value MUST be percent-encoded per [RFC 3986][]. Clients MUST percent-encode any byte outside the RFC 3986 `unreserved` set (`ALPHA`, `DIGIT`, `-`, `.`, `_`, `~`—in particular query delimiters and `+` as `%2B`). The unescaped value MUST be a valid canonical key (`1` to `1024` bytes in `0x21..0x7E`, see [Canonical keys](#canonical-keys)). If neither or both of `key` and `prefix` are present, or if the unescaped value is not a valid canonical key, the server MUST respond with a "400 Bad Request" HTTP status code.
+The `<key>` or `<key-prefix>` parameter value MUST be percent-encoded per [RFC 3986][]. Clients MUST percent-encode any byte outside the RFC 3986 `unreserved` set (`ALPHA`, `DIGIT`, `-`, `.`, `_`, `~`, in particular query delimiters and `+` as `%2B`). The unescaped value MUST be a valid canonical key (`1` to `1024` bytes in `0x21..0x7E`, see [Canonical keys](#canonical-keys)). If neither or both of `key` and `prefix` are present, or if the unescaped value is not a valid canonical key, the server MUST respond with a "400 Bad Request" HTTP status code.
 
 On a `prefix` query, a server MAY enforce an application-specific prefix policy (for example, rejecting bare TLD queries such as `com.` or `uk.co.` that do not contain a registrable domain). If `<key-prefix>` violates the server's prefix policy, the server MUST respond with a "400 Bad Request" HTTP status code. A server SHOULD enforce a maximum matched key count on `prefix` queries; if the number of keys in the MPT starting with `<key-prefix>` exceeds the server's limit, the server MUST abort the scan and respond with a "413 Content Too Large" HTTP status code.
 
@@ -237,17 +234,17 @@ proof FQUrvVQc2/IXY3yZ4vmGm5Wdxo9B17djMlHbR6i5fTjP
 golang.org/x/crypto obw28IrVp+Sx1FhKBsu5p2Lv2JwyXAFseatVCHqtUsE=
 
 c2sp.org/tlog-proof@v1
-extra YzJzcC5vcmcvdGxvZy12aW5kZXgtc3RhdGVAdjEKbXB0LXJvb3QgVUZ4cE4ycFAwdFczd1E1eGxhbHVJNnIwaUlqb2MwOHMybkZLK25uTDF1RT0KbWFwLWZuIGtFbFEybDVGaDYybTk4V3lPR2RyWFZYbldSdEJ5Q2Y5N0NDcmxLNFhDUWs9CmZyb20gMAoKZXhhbXBsZS5jb20vaW5wdXRsb2cKOTg3NjUKbHhEWmF1cEFKQXhXTlJuRUs0ZXNaS2RCOGQvTHErSlpHdytHQldDVUs1OD0KCuKAlCBleGFtcGxlLmNvbS9pbnB1dGxvZyBBejNncmxndHpQSUNhNU9TOG5wVm1mMU15cS81SVpuaU1wK1pKdXJtUkRlT29SRGU0VVJZTjd1NS9aaGN5djJxMWdHekdrdTluVG8renlXRSt4ZU1jVE9BWVE4PQo=
+extra YzJzcC5vcmcvdGxvZy12aW5kZXgtc3RhdGVAdjEKaW5wdXQtb3JpZ2luIGV4YW1wbGUuY29tL2lucHV0bG9nCmZyb20gMAppbnB1dC1zaXplIDk4NzY1CmlucHV0LXJvb3QgbHhEWmF1cEFKQXhXTlJuRUs0ZXNaS2RCOGQvTHErSlpHdytHQldDVUs1OD0KbXB0LXJvb3QgVUZ4cE4ycFAwdFczd1E1eGxhbHVJNnIwaUlqb2MwOHMybkZLK25uTDF1RT0K
 index 12
 RZP8gEWXTBy4gCcH9XPPkVhodGgAsHm+Z5ob/4sbqfM=
 JiuhJcYDxEsAsEN7LCirEe1u+Gwt0JHruBBQo0BqdNs=
 
 example.com/outputlog
 13
-pdC++7DEwrjyf+ZbXonKydZY09m6c7UCd0UVVmA2o0s=
+jR10gZzRRHNJbpwE1qNYfgk7jAv2Ta+5Ud8SpKcWZ6w=
 
-— example.com/outputlog opLqBQsREYCgu6xQkYQwJr9fo45a62DN9EdmHXnZdXNqlcVGlCum2Wks+49/V6267UEjw6QUXTS5Rovnzv++qbSzm9Q=
-— witness.example/w1 CMp+6LWBU0anHGH5aNDTJkH/gj79sG+T6+iP2ThYN5krrDJbR1HDnucjL39QsZTSvVjyQLrdk3DXDqI5G2HgLatVs0pWh6Up69HVOw==
+- example.com/outputlog opLqBQsREYCgu6xQkYQwJr9fo45a62DN9EdmHXnZdXNqlcVGlCum2Wks+49/V6267UEjw6QUXTS5Rovnzv++qbSzm9Q=
+- witness.example/w1 CMp+6LWBU0anHGH5aNDTJkH/gj79sG+T6+iP2ThYN5krrDJbR1HDnucjL39QsZTSvVjyQLrdk3DXDqI5G2HgLatVs0pWh6Up69HVOw==
 ```
 
 #### Binary MPT proofs
@@ -284,15 +281,15 @@ where `b` (`0 <= b <= 8192`) is the inner node's split bit position and `sib_has
 
 Value log entries (input log entry indices) for a key are served at
 
-    GET <index-url>/values?key=<key>&before=<before>[&limit=<limit>]
+    GET <index-url>/values?key=<key>&before=<before>
 
-`<key>` is a required query parameter containing the canonical key (see [Canonical keys](#canonical-keys)), percent-encoded per [RFC 3986][]. Clients MUST percent-encode any byte outside the RFC 3986 `unreserved` set (`ALPHA`, `DIGIT`, `-`, `.`, `_`, `~`—in particular query delimiters and `+` as `%2B`).
+`<key>` is a required query parameter containing the canonical key (see [Canonical keys](#canonical-keys)), percent-encoded per [RFC 3986][]. Clients MUST percent-encode any byte outside the RFC 3986 `unreserved` set (`ALPHA`, `DIGIT`, `-`, `.`, `_`, `~`).
 
-`before` is a required query parameter giving the exclusive upper bound on input log entry indices, encoded as a positive ASCII decimal integer (`1 <= before < 2^64`). On the initial page for a key discovered via `keys`, the client MUST set `before` to the input log checkpoint tree size (`input_size`) from the `c2sp.org/tlog-vindex-state@v1` payload of the `keys` response, pinning the query to the exact snapshot committed by `value_root`. On continuation pages, the client MUST set `before` to the first (smallest) input log entry index returned on the preceding page.
+`before` is a required query parameter giving the exclusive upper bound on input log entry indices, encoded as a positive ASCII decimal integer (`1 <= before < 2^64`). On the initial page for a key discovered via `keys`, the client MUST set `before` to the input log tree size (`input-size`) from the `c2sp.org/tlog-vindex-state@v1` payload of the `keys` response, pinning the query to the exact snapshot committed by `value_root`. On continuation pages, the client MUST set `before` to the first (smallest) input log entry index returned on the preceding page.
 
-`limit` is an optional query parameter giving an advisory maximum number of entry indices to return, encoded as a positive ASCII decimal integer (`1 <= limit < 2^64`). The server MAY return fewer or more entry indices (for example, to align page boundaries with precomputed storage chunks) provided at least one entry index is returned whenever matching occurrences strictly less than `before` exist.
+The server MAY align page boundaries with precomputed storage chunks, provided at least one entry index is returned whenever matching occurrences in `[from, before)` exist.
 
-If `<key>` is missing or is not a valid canonical key, `before` is missing, or `before` or `limit` is not a positive ASCII decimal integer (`1 <= x < 2^64`), the server MUST respond with a "400 Bad Request" HTTP status code. Once the server has indexed input log entries at least up to `before`, if `<key>` has zero occurrences strictly less than `before`, the server MUST respond with a "404 Not Found" HTTP status code.
+If `<key>` is missing or is not a valid canonical key, or if `before` is missing or is not a positive ASCII decimal integer (`1 <= before < 2^64`), the server MUST respond with a "400 Bad Request" HTTP status code. Once the server has indexed input log entries at least up to `before`, if `<key>` has zero occurrences in `[from, before)`, the server MUST respond with a "404 Not Found" HTTP status code.
 
 ```
 c2sp.org/tlog-vindex-values@v1
@@ -336,13 +333,11 @@ To authenticate the state commitment in a `keys` response:
 
 2. Extract the base64-encoded `extra` field from the `c2sp.org/tlog-proof@v1` block, decode `state_entry`, and compute the output log leaf hash `SHA-256(0x00 || state_entry)`.
 
-3. Verify the `c2sp.org/tlog-proof@v1` block against that leaf hash and the client's configured output log [tlog-policy][] according to [tlog-proof][]. Let `output_size` be the verified output log checkpoint tree size. Check that `output_size >= 1` and that the proven entry `index` equals `output_size - 1`.
+3. Verify the `c2sp.org/tlog-proof@v1` block against that leaf hash, `<output-log-origin>`, and the client's output log checkpoint verification policy according to [tlog-proof][]. Let `output_size` be the verified output log checkpoint tree size. Check that `output_size >= 1` and that the proven entry `index` equals `output_size - 1`.
 
-4. Parse `state_entry` as a `c2sp.org/tlog-vindex-state@v1` record (see [Output log entries](#output-log-entries)) to obtain `mpt_root`, the `map-fn` digest, `from`, and the embedded `<input-log-checkpoint>`. If the client is configured with an expected `map-fn` commitment, check that the entry's `map-fn` matches; otherwise, validate its syntactic encoding and ignore its value.
+4. Parse `state_entry` as a `c2sp.org/tlog-vindex-state@v1` record (see [Output log entries](#output-log-entries)) to obtain `input_origin`, `from`, `input_size`, `input_root`, and `mpt_root`. Check that `input_origin` equals the client's configured `<input-log-origin>` and that `0 <= from <= input_size`. If `from = input_size`, check that `mpt_root` equals `empty_mpt_hash`. Because a lookup response only attests to input log entries in `[from, input_size)`, callers that require coverage back to a specific entry index MUST check that `from` does not exceed that bound.
 
-5. Verify the embedded `<input-log-checkpoint>` against the client's configured input log [tlog-policy][]. Let `input_size` be the verified input log checkpoint tree size, and check that `0 <= from <= input_size`.
-
-6. A stateful client that caches previously observed checkpoints MUST reject the response if `output_size` or `input_size` is smaller than previously verified sizes, if a checkpoint at an equal tree size has a different root hash, or if `map-fn` or `from` differs from previously verified output log entries.
+   If the client subsequently fetches matched entries from the input log, it MUST authenticate those entries against `(input_size, input_root)` according to the input log's specification, and unless relying solely on the witnessed output log and auditors for input log checkpoint validity, verify that `(input_size, input_root)` is Merkle-consistent with a signed input log [checkpoint][] verified under its input log policy.
 
 ### Verifying an MPT path
 
@@ -372,7 +367,7 @@ To verify an exact key lookup (`GET <index-url>/keys?key=<key>`, with `target = 
 
 Given a canonical key `key`, an expected 32-byte value log root `value_root`, the start index `from`, and cursor `before` (initialized to `input_size` from the `keys` response):
 
-1. Fetch `GET <index-url>/values?key=<key>&before=<before>[&limit=<limit>]`.
+1. Fetch `GET <index-url>/values?key=<key>&before=<before>`.
 
 2. Check that the first line is `c2sp.org/tlog-vindex-values@v1`, parse `preceding` from the second line, and decode the remaining lines before the empty line as 32-byte compact range hashes (checking that the number of hashes equals the number of `1` bits in the binary representation of `preceding`).
 
@@ -388,17 +383,21 @@ Given a canonical key `key`, an expected 32-byte value log root `value_root`, th
 
 Because every state transition of a verifiable index is committed to the output log ([tlog-tiles][]), any third party can audit the index operator without trusting the `keys` or `values` HTTP endpoints:
 
-1. Fetch and verify the output log checkpoint at `<output-log-url>/checkpoint` against the output log [tlog-policy][], verifying Merkle consistency with previously audited output log checkpoints. Fetch new output log entry bundles from `<output-log-url>/tile/entries/...` and authenticate them against the output log checkpoint root hash according to [tlog-tiles][].
+1. Fetch and verify the output log [checkpoint][] at `<output-log-url>/checkpoint` against `<output-log-origin>` and the auditor's output log checkpoint verification policy, verifying Merkle consistency with previously audited output log checkpoints. Fetch new output log entry bundles from `<output-log-url>/tile/entries/...` and authenticate them against the output log checkpoint root hash according to [tlog-tiles][].
 
-2. Initialize the auditor's local MPT to the empty trie and set `prev_size` to the index's configured `from` parameter.
+2. Fetch and verify a signed input log [checkpoint][] against the auditor's input log verification policy to obtain an authenticated input log tree size `latest_input_size` and root hash `latest_input_root` (re-fetching as needed when auditing newer output log entries). Initialize the auditor's local MPT to the empty trie and set `prev_size` to the index's configured `from` parameter.
 
 3. For each output log entry in sequential order:
-   - Parse the `c2sp.org/tlog-vindex-state@v1` payload to obtain `mpt_root`, the `map-fn` digest, `from`, and the embedded input log checkpoint. Check that `map-fn` and `from` match the index's configured parameters.
-   - Verify the input log checkpoint against the input log [tlog-policy][], let `input_size` be its tree size, check that `prev_size <= input_size`, and (after the first output log entry) verify that the input log checkpoint is Merkle-consistent with the previous entry's input log checkpoint.
-   - Fetch the input log entries in `[prev_size, input_size)` and authenticate them against the input log checkpoint root hash according to the input log's specification. For each input log entry at `entry_idx` in sequential order, execute the mapping function to obtain the deduplicated set of canonical keys, check that each emitted key is a valid canonical key (see [Canonical keys](#canonical-keys)), append `value_log_leaf_hash(entry_idx)` to the key's value log, and update `(key, value_root)` in the local MPT.
+   - Parse the `c2sp.org/tlog-vindex-state@v1` payload to obtain `input_origin`, `from`, `input_size`, `input_root`, and `mpt_root`. Check that `input_origin` matches `<input-log-origin>`, `from` matches the index's configured start index, and `prev_size <= input_size <= latest_input_size`.
+   - Verify that `(input_size, input_root)` is Merkle-consistent with `(latest_input_size, latest_input_root)` (checking `input_root = latest_input_root` when `input_size = latest_input_size`).
+   - Fetch the input log entries in `[prev_size, input_size)` and authenticate them against `input_root` (or `latest_input_root`) according to the input log's specification. For each input log entry at `entry_idx` in sequential order, execute the mapping function to obtain the deduplicated set of canonical keys, check that each emitted key is a valid canonical key (see [Canonical keys](#canonical-keys)), append `value_log_leaf_hash(entry_idx)` to the key's value log, and update `(key, value_root)` in the local MPT.
    - Check that the local MPT root hash equals `mpt_root`, and set `prev_size = input_size`. Any mismatch proves that the index operator published an invalid state commitment to the output log.
 
 ## Design Rationale
+
+### Unsigned input log state in output log entries
+
+Output log entries commit to `input-origin`, `input-size`, and `input-root` directly rather than embedding a signed input log [checkpoint][]. Embedding input log signatures and checkpoint extension lines inside `state_entry` would freeze a single set of input log witness cosignatures at publish time (preventing clients with different witness policies from verifying the entry), couple `/keys` lookup clients to input log signature formats (such as [static-ct-api][] ECDSA notes), and allow optional checkpoint extension lines to cause two indexers at the same `input_size` to produce different `state_entry` bytes. Instead, auditors verify Merkle consistency of `(input_size, input_root)` against signed input log checkpoints, and index operators retain the signed input log checkpoints out-of-band to prove input log equivocation if a conflict ever arises.
 
 ### Unpaginated prefix proofs
 
@@ -410,7 +409,11 @@ When verifying a non-empty prefix proof, the MPT path verification step only che
 
 ### Backward pagination of value log entries
 
-A single canonical key may appear millions of times in the input log, whereas most lookup clients only need the most recent occurrences. Representing each key's occurrences as an append-only [RFC 6962][] value log and paginating backward from `before` allows the server to summarize all `preceding` older occurrences using the compact range hashes of the `preceding` older leaves. The client verifies the newest page directly against `value_root` and, if it wishes to inspect older pages, folds those same compact range hashes to obtain the exact expected `value_root` for the next backward page—requiring no Merkle consistency proofs and no additional round-trips.
+A single canonical key may appear millions of times in the input log, whereas most lookup clients only need the most recent occurrences. Representing each key's occurrences as an append-only [RFC 6962][] value log and paginating backward from `before` allows the server to summarize all `preceding` older occurrences using the compact range hashes of the `preceding` older leaves. The client verifies the newest page directly against `value_root` and, if it wishes to inspect older pages, folds those same compact range hashes to obtain the exact expected `value_root` for the next backward page, requiring no Merkle consistency proofs and no additional round-trips.
+
+## Design Log
+
+- **Mapping function commitment (`map-fn`) shelved pre-1.0**: An in-band commitment to the mapping function inside `c2sp.org/tlog-vindex-state@v1` was considered and removed for now to keep the specification minimal, due to open questions around both **(a) encoding** (whether to commit to raw compiled bytecode such as `.wasm`, a reproducible build/provenance manifest, or a language-agnostic prose profile identifier) and **(b) verification** (lookup clients cannot verify that an opaque digest matches expected mapping semantics, while independent clean-room auditors in other languages verify prose specifications rather than executing shared bytecode). An in-band commitment can be re-added prior to 1.0 following ecosystem discussion.
 
 ## Acknowledgements
 
@@ -421,7 +424,6 @@ The MPT structure and binary proof encoding are based on the Merkle Patricia Tri
 [RFC 6962, Section 2.1]: https://www.rfc-editor.org/rfc/rfc6962.html#section-2.1
 [checkpoint]: https://c2sp.org/tlog-checkpoint@v1.1.0
 [static-ct-api]: https://c2sp.org/static-ct-api@v1.1.0
-[tlog-policy]: https://c2sp.org/tlog-policy
 [tlog-proof]: https://c2sp.org/tlog-proof
 [tlog-tiles]: https://c2sp.org/tlog-tiles@v1.0.0
 [tlog-witness]: https://c2sp.org/tlog-witness@v1.1.0
