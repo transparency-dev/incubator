@@ -75,6 +75,18 @@ The VIndex topology bounds search indexing between two append-only logs—a stru
 
 ## 6. Documentation
 
+### Core Specification & Architecture
 - [**C2SP `tlog-vindex` Specification**](./docs/tlog-vindex.md): Normative wire formats, MPT and value-log Merkle definitions, HTTP lookup endpoints, and client/auditor verification rules.
 - [**Verifiable Index Applications**](./docs/APPLICATIONS.md): How VIndex applies across Certificate Transparency, Merkle Tree Certificates, Go SumDB, Sigstore, and Sigsum—who monitors each log, illustrative canonical key shapes, prefix queries, and epoch rotation (`from > 0`).
 - [**Verifiable Index Architecture**](./docs/ARCHITECTURE.md): High-level pipeline stages, checkpoint promotion invariants, concurrency model, Zero-WAL crash recovery, auditing boundaries, and architectural trade-offs.
+
+### Subcomponent Designs
+- [**Client SDK & Query Proof Verification**](./client/README.md): Public Go lookup client API, backward value-log streaming, and offline cryptographic proof verification.
+- [**WASM Guest SDK & Plugin Interface**](./mapfn/README.md): WebAssembly mapping function SDK, sandbox host interface, and verification tooling.
+- [**Ingestion Pipeline & Bundle Cache**](./internal/ingest/README.md): Input Log checkpoint verification, local entry-bundle cache, worker pool orchestration, and chronological resequencing.
+- [**Inverted Chunk Storage Engine**](./internal/kvstore/README.md): Embedded LSM value-log chunk layout, compact range persistence, and snapshot-bounded reads.
+- [**Authenticated State Commitment**](./internal/tree/README.md): Variable-length MPT wrapper, non-blocking root prediction, Output Log publication, and serving-snapshot promotion.
+- [**Read Serving & Query Endpoints**](./internal/server/README.md): `<index-url>/keys` and `<index-url>/values` HTTP handlers, prefix policy guardrails, and reader snapshot isolation.
+- [**Coordinator & Lifecycle Engine**](./internal/coordinator/README.md): Sync-cycle orchestration, checkpoint ratcheting, Genesis Backfill, and Zero-WAL startup recovery.
+- [**Independent Log Auditor**](./internal/auditor/README.md): Continuous Output Log tailing, independent Input Log replay, and divergence alerting.
+- [**Hammer Load Testing & Verification**](./internal/hammer/README.md): Synthetic workload generation and continuous end-to-end lookup verification.
