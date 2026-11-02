@@ -89,7 +89,7 @@ Ecosystem authors express mapping logic as a deterministic function from raw Inp
 
 VIndex separates trie structure from per-key occurrence lists using a **hybrid keying model**:
 
-- The **MPT** indexes **un-hashed variable-length canonical keys** directly so keys sharing a string prefix form a contiguous subtrie for [two-sided prefix proofs](./tlog-vindex.md#verifying-a-keys-response).
+- The **MPT** indexes **un-hashed variable-length canonical keys** directly so keys sharing a string prefix form a contiguous subtrie for [prefix subtree proofs with two-sided verification](./tlog-vindex.md#two-sided-prefix-verification).
 - The **KV store** indexes per-key value-log chunks by fixed-size **`SHA-256(key)` digests** computed on the host, keeping LSM keys uniform and decoupled from variable canonical key lengths.
 
 Within the KV store, each key's matching `entry_idx` sequence is partitioned into fixed-window chunks ordered newest-first under `SHA-256(key)`. Each chunk stores the RFC 6962 compact range hashes of all older occurrences preceding that chunk alongside compact relative offsets within the window:

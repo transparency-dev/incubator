@@ -35,7 +35,7 @@ Earlier systems attempted to act as verifiable state machines that copied, aggre
 
 ## 3. The Map Sandwich Architecture
 
-The VIndex topology bounds search indexing between two append-only logs—a structure known as the **"Map Sandwich"**:
+The VIndex topology bounds search indexing between two append-only logs, a structure known as the **"Map Sandwich"**:
 
 | Component | Physical Role | Cryptographic Contract |
 | :--- | :--- | :--- |
@@ -77,7 +77,7 @@ The VIndex topology bounds search indexing between two append-only logs—a stru
 
 ### Core Specification & Architecture
 - [**C2SP `tlog-vindex` Specification**](./docs/tlog-vindex.md): Normative wire formats, MPT and value-log Merkle definitions, HTTP lookup endpoints, and client/auditor verification rules.
-- [**Verifiable Index Applications**](./docs/APPLICATIONS.md): How VIndex applies across Certificate Transparency, Merkle Tree Certificates, Go SumDB, Sigstore, and Sigsum—who monitors each log, illustrative canonical key shapes, prefix queries, and epoch rotation (`from > 0`).
+- [**Verifiable Index Applications**](./docs/APPLICATIONS.md): How VIndex applies across Certificate Transparency, Merkle Tree Certificates, Go SumDB, Sigstore, and Sigsum: who monitors each log, illustrative canonical key shapes, prefix queries, and epoch rotation (`from > 0`).
 - [**Verifiable Index Architecture**](./docs/ARCHITECTURE.md): High-level pipeline stages, checkpoint promotion invariants, concurrency model, Zero-WAL crash recovery, auditing boundaries, and architectural trade-offs.
 
 ### Subcomponent Designs

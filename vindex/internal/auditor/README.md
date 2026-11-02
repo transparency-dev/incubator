@@ -1,94 +1,39 @@
 # Independent Log Auditor
 
-This document defines the architecture, continuous audit loop, root mismatch alerting, state-preserving halt protocols, and adversarial threat model for the **Auditor Subsystem** (`vindex/internal/auditor`).
+Lookup clients ([`client/`](../../client/README.md)) verify that individual query responses match a witnessed Output Log commitment, but they cannot verify that the committed `mpt_root` itself was honestly constructed from the Input Log without omitting or fabricating unqueried keys. `vindex/internal/auditor` (`vindex-auditor`) closes that security loop: it independently replays the Input Log from `from` through the mapping function, recomputes every key's Value Log and the global MPT, and asserts that every state commitment published in the Output Log matches the reconstructed root.
+
+This reference auditor reuses the indexer's Pebble chunk store ([`internal/kvstore`](../kvstore/README.md)) and disk-backed MPT (`internal/mpt`) to share the high-throughput ingestion pipeline (90,000 to 240,000+ entries/sec, requiring equivalent RAM and NVMe sizing) and preserve inspectable on-disk forensic state immediately prior to any divergence. However, reusing the indexer's storage and trie code is not required by the protocol, and relying solely on a single codebase would only verify that the operator ran the same code rather than catching shared implementation bugs. Independent clean-room auditors (written in other languages or using different storage and mapping implementations conforming to [`docs/tlog-vindex.md`](../../docs/tlog-vindex.md#auditing-the-index)) should also audit the Output Log to provide true implementation diversity.
+
+### Non-Goals & Future Work
+- **No Automatic Retry / Self-Healing on Root Mismatch**: On any root mismatch or consistency violation, the auditor halts immediately and freezes local disk state to preserve forensic evidence.
+- **No Checkpoint Signing or Publication**: Strictly an independent consumer and verifier of the Output Log and Input Log.
+- **No HTTP Lookup Serving (Future Work)**: Although an auditor maintains a verified MPT and Pebble chunk store locally, `c2sp.org/tlog-vindex` does not yet specify read-mirror semantics (such as which Output Log checkpoint a lagging or halted auditor serves to satisfy the `index == output_size - 1` latest-entry proof check). Verified mirror serving is deferred to future work.
 
 ---
 
-## 1. Context & Objectives
+## 1. Design
 
-### 1.1 Problem Statement & The Operator Trust Dilemma
-The index operator publishes an Output Log asserting that its verifiable index accurately, completely, and deterministically represents the underlying Input Log over `[from, input_size)`.
+### 1.1 The Continuous Audit Loop
 
-However, in a verifiable transparency architecture, lookup clients and ecosystem monitors cannot simply trust the index operator's claims. A compromised, coerced, or buggy index operator could:
-1. **Targeted Omission Attacks**: Commit an invalid `mpt_root` that silently conceals specific certificates, packages, or identities, while returning valid-looking non-inclusion proofs against that forged `mpt_root`.
-2. **Equivocation & Split-Views**: Present conflicting Output Log checkpoints to different monitors or lookup clients.
-3. **Historical Rollbacks & Parameter Drift**: Regress tree sizes or mutate `input-origin` or `from` across Output Log entries.
+The auditor is configured with `<output-log-url>`, the Input Log retrieval endpoint (requiring historical entry bundles across `[from, input_size)` to remain retrievable), expected `<output-log-origin>` and `<input-log-origin>`, checkpoint verification policies (such as [C2SP `tlog-policy`](https://c2sp.org/tlog-policy)) for both logs, the compiled WASM `MapFn` module, and the start index `from` (default `0`).
 
-To enforce cryptographic integrity, independent third parties must be able to audit the index operator's Output Log state commitments from `from` to the Output Log head without trusting the `/keys` or `/values` HTTP endpoints. This reference auditor implementation reuses the Pebble inverted chunk store ([`internal/kvstore`](../kvstore/README.md)) and disk-backed MPT (`internal/mpt`) from the indexer to share the high-throughput ingestion/recovery pipeline and preserve inspectable on-disk forensic state immediately prior to any divergence. However, reusing the indexer's storage and trie packages is not required by the protocol—and relying solely on a single codebase would only verify that the operator ran the same code, not that the code itself is free of shared bugs. Independent clean-room auditors (written in other languages or using different storage and mapping implementations conforming to [`docs/tlog-vindex.md`](../../docs/tlog-vindex.md#auditing-the-index)) should also audit the Output Log to provide true implementation diversity.
+Initialized with an empty local MPT and `prev_size = from` (or, on restart, after replaying local Phase 2 MPT catch-up across `[max(MPT_Durable_Size, from), audited_input_size)` if the MPT's persisted `(version, exact)` lags `audited_input_size`), the auditor executes the 4-step loop defined in [`docs/tlog-vindex.md`](../../docs/tlog-vindex.md):
 
-### 1.2 Goals, Non-Goals & Future Work
-- **Goals**:
-  - Continuously audit published Output Log index state commitments (`c2sp.org/tlog-vindex-state@v1`) against authenticated Input Log entries starting from the configured `from` index (default `0`).
-  - Verify Output Log and Input Log checkpoints against configured checkpoint verification policies (such as [C2SP `tlog-policy`](https://c2sp.org/tlog-policy)).
-  - Assert cryptographic equality between the independently reconstructed local `mpt_root` and the index operator's committed `mpt_root` at every Output Log entry.
-  - Signal divergence immediately via Prometheus metrics, structured logs, and readiness probe degradation (`/readyz` on the internal operational listener).
-  - Freeze physical database state on root mismatch to preserve forensic post-mortem evidence.
-- **Non-Goals**:
-  - **No Automatic Retry / Self-Healing on Root Mismatch**: If a root mismatch occurs, the auditor does not guess or retry; it halts immediately to preserve evidence of operator fraud or software bugs.
-  - **No Operator Checkpoint Generation**: The auditor does not sign or publish Output Log checkpoints; it is strictly an independent consumer and auditor.
-  - **No HTTP Lookup Serving**: The auditor does not serve `/keys` or `/values` lookup queries; verified read-mirror serving is out of scope.
-- **Future Work (Verified Mirror Serving)**:
-  - Because an auditor already maintains a locally verified MPT and Pebble chunk store, it could in principle also serve C2SP lookup queries (`/keys` and `/values`) as a read mirror. Mirror serving is intentionally omitted for now: `c2sp.org/tlog-vindex` does not specify mirror semantics, and serving lookups from an auditor introduces protocol design questions around which Output Log checkpoint is served and how to satisfy the `index == output_size - 1` latest-entry proof requirement when an auditor lags or halts behind the index operator's Output Log head. This capability can be revisited in future work once specified.
-
-### 1.3 Requirements, Dependencies & Constraints
-- **Dependencies**: Integrates checkpoint policy and Merkle verification (`internal/wire`), the tile fetcher and local tile cache ([`internal/ingest`](../ingest/README.md)), the KV chunk store ([`internal/kvstore`](../kvstore/README.md)), and the MPT (`internal/mpt`).
-- **Hardware Sizing Parity**: Running a full-log auditor requires the same RAM and NVMe disk capacity as the index operator to maintain the local MPT and Pebble chunk store.
-- **Historical Entry Availability**: Auditing an Output Log from `from` requires historical Input Log entry bundles across `[from, input_size)` to remain retrievable.
-
----
-
-## 2. Detailed Design
-
-### 2.1 Ecosystem Verification Architecture & Policy Configuration
-
-VIndex verification operates across two complementary boundaries:
-
-| Role & Component | Execution Scope | Target Consumer | Threat Coverage |
+| Step | Phase | Operations | Verification & Persistence Rules |
 | :--- | :--- | :--- | :--- |
-| **Lookup Client Verification** ([`client/`](../../client/README.md)) | Verifies individual `/keys` and `/values` responses against witnessed Output Log checkpoints. | Lookup clients, end-user apps, CLIs. | Verifies inclusion/non-inclusion/prefix proofs for queried keys; verifies Output Log checkpoint policies and witness quorums; verifies backward Value Log pagination chains. |
-| **Full-Log Independent Auditor** (`vindex/internal/auditor`) | Independently replays all Input Log entries in `[from, input_size)` and reconstructs the full MPT across every Output Log entry. | Standalone monitoring daemon (`vindex-auditor`). | Detects operator equivocation, forged `mpt_root` commitments, `input-origin`/`from` drift, targeted omission of unqueried keys, and tree rollbacks; enforces checkpoint witness quorums and Merkle consistency. |
+| **1** | **Poll Output & Input Checkpoints** | Fetches `<output-log-url>/checkpoint` and a signed Input Log `/checkpoint` (`latest_input_size`, `latest_input_root`, re-fetched whenever a newer Output Log entry commits `input_size > latest_input_size`). | Verifies both checkpoints against their expected origins and checkpoint policies, and verifies Output Log Merkle consistency against the previously audited Output Log checkpoint before reading any entries. |
+| **2** | **Stream Output Entries** | Fetches new Output Log entry bundles from `<output-log-url>/tile/entries/...` from the last audited `output_size` up to the new `output_size`. | Authenticates bundles against the verified Output Log checkpoint root per `tlog-tiles`, parses each 6-line `c2sp.org/tlog-vindex-state@v1` entry (`input-origin`, `from`, `input-size`, `input-root`, `mpt-root`) in order, asserts `input_origin` and `from` match configured parameters and `prev_size <= input_size <= latest_input_size`, and verifies that `(input_size, input_root)` is Merkle-consistent with `(latest_input_size, latest_input_root)` (checking `input_root == latest_input_root` when `input_size == latest_input_size`). |
+| **3** | **Fetch, Map & Calculate Local MPT Root** | Downloads Input Log entry bundles covering `[prev_size, input_size)` (slicing boundary 256-entry bundles to exclude entries `< from` on non-256-aligned initial bundles and entries `>= input_size` on partial tail bundles), maps entries via `MapFn`, updates modified Value Logs and `(canonicalKey, value_root)` mappings in the local MPT, and calculates the resulting local `mpt_root`. | Authenticates Input Log bundles against `input_root` (or `latest_input_root`), validates canonical key bounds (`1..1024` bytes in `0x21..0x7E`), deduplicates keys per `entry_idx`, appends `value_log_leaf_hash(entry_idx)` to each key's Value Log, and updates the local MPT to compute the root at `input_size`. On crash replay, any `entry_idx` already persisted in Pebble is skipped while reconstructing its point-in-time `(canonicalKey, value_root)` at `input_size`. |
+| **4** | **Assert Root Equality** | Compares the calculated local `mpt_root` against `mpt_root` in the Output Log entry. | **Match**: Persists the updated chunk state, MPT snapshot, and `audited_output_size` / `audited_input_size` watermarks (`KV_CP >= MPT_Durable_Size`), and sets `prev_size = input_size`.<br>**Mismatch**: Executes the state-preserving halt protocol without advancing verified watermarks, freezing disk state and emitting alerts. |
 
-#### Auditor Configuration & Checkpoint Policy Enforcement
-The auditor daemon is configured with `<output-log-url>`, the expected `<output-log-origin>` and `<input-log-origin>`, the Input Log checkpoint and entry retrieval endpoint, the compiled WASM `MapFn` module, the configured start index `from` (`0` by default, or `> 0` for suffix indices), and checkpoint verification policies (such as C2SP `tlog-policy` policies) for both the Output Log and the Input Log. Every Output Log checkpoint and polled Input Log checkpoint is verified against its expected origin and checkpoint policy before any entries are processed.
+### 1.2 Root Mismatch Alerting, State-Preserving Halt & Runbook
 
-### 2.2 The Continuous Audit Loop
-Initialized with an empty local MPT and `prev_size = from` (or, on process restart, after running local Phase 2 MPT catch-up across `[max(MPT_Durable_Size, from), audited_input_size)` if the MPT's persisted `(version, exact)` lags `audited_input_size`), the auditor polls `<output-log-url>/checkpoint` and verifies `(input_size, input_root)` from each `c2sp.org/tlog-vindex-state@v1` entry against a signed Input Log checkpoint (`latest_input_size`, `latest_input_root`, re-fetched whenever `input_size > latest_input_size`), executing the 5-step audit loop defined in [`docs/tlog-vindex.md`](../../docs/tlog-vindex.md):
+On any root mismatch or upstream consistency/policy violation, the auditor halts and freezes local database state on disk for forensic triage:
 
-| Step | Phase | Action & Operations | Verification Check |
-| :--- | :--- | :--- | :--- |
-| **1** | **Poll Output & Input Checkpoints** | Fetches `<output-log-url>/checkpoint` and a signed Input Log `/checkpoint` (re-fetching the Input Log checkpoint as needed when auditing newer Output Log entries). | Verifies Output Log and Input Log checkpoint origins, primary signatures, and witness cosignatures against their respective checkpoint verification policies, and verifies Output Log Merkle consistency against the previously audited Output Log checkpoint. |
-| **2** | **Stream Output Entries** | Fetches new Output Log entry bundles from `<output-log-url>/tile/entries/...` from the last audited `output_size` up to the new `output_size`. | Authenticates entry bundles against the verified Output Log checkpoint root hash per `tlog-tiles`, parses each 6-line `c2sp.org/tlog-vindex-state@v1` entry (`input-origin`, `from`, `input-size`, `input-root`, `mpt-root`), asserts `input_origin` and `from` match configured parameters, checks `prev_size <= input_size <= latest_input_size`, and verifies that `(input_size, input_root)` is Merkle-consistent with `(latest_input_size, latest_input_root)` (checking `input_root == latest_input_root` when `input_size == latest_input_size`). |
-| **3** | **Fetch, Map & Stage Input Entries** | Downloads Input Log entries in `[prev_size, input_size)` (slicing non-256-aligned initial `from` or partial tail bundles), filters already-persisted entries, stages chunk mutations into an uncommitted indexed Pebble batch, and collects modified `(canonicalKey, value_root)` mappings in memory. | Authenticates Input Log entry bundles against `input_root` (or `latest_input_root`), executes sandboxed `MapFn`, checks that every emitted key is a valid canonical key (`1..1024` bytes in `0x21..0x7E`), deduplicates keys per `entry_idx`, appends `value_log_leaf_hash(entry_idx)` to each key's Value Log inside the uncommitted batch, and enforces replay deduplication. |
-| **4** | **Predict Candidate MPT Root** | Evaluates the accumulated in-memory `(canonicalKey, value_root)` pairs against the local MPT without mutating verified tree state. | Computes the candidate local `mpt_root` in memory under a shared read lock. |
-| **5** | **Assert Root Equality & Commit** | Asserts that the candidate local `mpt_root` equals the committed `mpt_root` in the Output Log entry. | **Match**: Applies the staged Pebble batch (`'c'` chunks + `audited_output_size` + `audited_input_size`) with durable `fsync`, commits and syncs MPT mutations, and sets `prev_size = input_size`.<br>**Mismatch**: Triggers state-preserving halt, discards the uncommitted Pebble batch and clears the in-memory active chunk cache, freezes database files, and emits alerts. |
-
-#### Step Details:
-1. **Discover & Authenticate Checkpoints**: Polls `<output-log-url>/checkpoint`, verifies `<output-log-origin>` and witness cosignatures against the Output Log checkpoint policy, and verifies a Merkle consistency proof from the previously audited Output Log checkpoint. Fetches and verifies a signed Input Log `/checkpoint` against `<input-log-origin>` and the Input Log checkpoint policy to obtain `(latest_input_size, latest_input_root)` (re-fetching as needed when auditing newer Output Log entries). If policy or consistency verification fails, the checkpoint is rejected before reading any entries.
-2. **Stream State Commitments & Verify Input Log Consistency**: Fetches new Output Log entry bundles from `<output-log-url>/tile/entries/...` and authenticates them against the Output Log checkpoint root hash according to `tlog-tiles`. For each 6-line `c2sp.org/tlog-vindex-state@v1` Output Log entry in sequential order, parses `(input_origin, from, input_size, input_root, mpt_root)`, checks that `input_origin` and `from` match the auditor's configured parameters and `prev_size <= input_size <= latest_input_size`, and verifies that `(input_size, input_root)` is Merkle-consistent with `(latest_input_size, latest_input_root)`.
-3. **Fetch, Map & Stage Input Entries**: For the Input Log entry range `[prev_size, input_size)`:
-   - Fetches Input Log entry bundles and authenticates them against `input_root` (or `latest_input_root`) according to `tlog-tiles` or `static-ct-api`, slicing boundary 256-entry bundles to `[prev_size, input_size)` so entries `< from` on non-256-aligned initial bundles and entries `>= input_size` on partial tail bundles are excluded.
-   - Executes the WASM `MapFn` on each Input Log entry at `entry_idx` in sequential order, validates that every emitted key is a canonical key (`1..1024` printable ASCII bytes in `0x21..0x7E`), and deduplicates keys emitted for the same `entry_idx`.
-   - Stages chunk mutations into an uncommitted **indexed Pebble batch** (`stagedBatch`), which reads through uncommitted batch state and the active chunk cache to return the updated `(canonicalKey, value_root)` mappings directly in memory without writing to the underlying database.
-   - **Replay Deduplication Invariant**: On restart or crash replay, any Input Log entry indices `< from` or already persisted in Pebble are filtered out prior to appending `value_log_leaf_hash(entry_idx)` to active chunks while still reconstructing their point-in-time `(canonicalKey, value_root)` pairs at `input_size` from the KV store for Step 4, ensuring idempotent crash recovery without false root mismatches.
-4. **Predict Candidate MPT Root**: Evaluates the accumulated in-memory `(canonicalKey, value_root)` mappings at `input_size` against the local MPT using non-mutating prediction to compute the candidate local `mpt_root`.
-5. **Root Equality Assertion & Commit**: Checks that the candidate local `mpt_root` equals the Output Log entry's `mpt_root`:
-   - If equal: atomically applies the staged Pebble batch (`'c'` chunks together with `audited_output_size` and `audited_input_size`, advancing `prev_size = input_size`) with a durable disk sync before committing and syncing MPT mutations (`KV_CP >= MPT_Durable_Size`). If the process crashes between the Pebble commit and MPT `fsync`, startup MPT catch-up replays `[max(MPT_Durable_Size, from), audited_input_size)` from local storage before auditing the next Output Log entry.
-   - If divergent: closes and discards the uncommitted Pebble batch, clears the in-memory active chunk cache, and enters the state-preserving halt protocol without advancing watermarks or mutating the verified MPT and Pebble state on disk.
-
-### 2.3 Root Mismatch Alerting & State-Preserving Halt
-If the candidate local `mpt_root` differs from the committed `mpt_root`, or an upstream consistency/policy fault is detected, the auditor immediately executes a coordinated containment response:
-
-1. **Sync Engine Halt**:
-   - The background audit loop terminates immediately.
-   - Verified watermarks are **not** advanced on disk.
-2. **Forensic State Freeze**:
-   - Discards the uncommitted Pebble staging batch and clears the in-memory chunk cache while leaving verified Pebble DB and MPT files intact on disk, freezing the exact pre-divergence state for forensic triage and public misbehavior reporting.
-3. **Metrics & Structured Logging**:
-   - Increments the root mismatch counter metric and sets the root mismatch gauge to `1`.
-   - Emits structured error logs recording the divergent output entry index, target `input_size`, candidate local root, and committed root.
-4. **Health and Readiness Probes (Internal Operational Listener)**:
-   - `/healthz`: Remains **HTTP 200 OK** as long as the auditor process is alive, preventing container orchestrators from restarting the halted process and disturbing frozen forensic state or diagnostic endpoints.
-   - `/readyz`: Returns **HTTP 503 Service Unavailable** on the internal operational listener with structured JSON diagnostics:
+1. **State Freeze & Telemetry**: Terminates the background audit loop without advancing verified watermarks, leaves local Pebble and MPT files intact on disk for inspection, sets the root mismatch gauge metric to `1`, and logs the divergent `output_index`, `input_size`, `local_root`, and `committed_root`.
+2. **Operational Probes (Internal Admin Listener)**:
+   - `/healthz`: Remains **`200 OK`** while the process is alive so container orchestrators do not restart the halted auditor and disturb frozen disk state.
+   - `/readyz`: Returns **`503 Service Unavailable`** with structured JSON diagnostics:
      ```json
      {
        "status": "degraded",
@@ -99,78 +44,39 @@ If the candidate local `mpt_root` differs from the committed `mpt_root`, or an u
        "committed_root": "b7c2..."
      }
      ```
+3. **Operator Runbook**:
+   - Do not wipe storage; inspect `/readyz` and structured logs for the divergent `(output_index, input_size, local_root, committed_root)`.
+   - Compare local Pebble `'c'` chunks against raw Input Log entries in `[prev_size, input_size)` and re-run the auditor in one-shot mode with an isolated scratch directory to confirm deterministic reproduction.
+   - If `MapFn` and Input Log entries are valid, publish the misbehavior proof bundle (witnessed Output Log checkpoint, inclusion proof, raw `c2sp.org/tlog-vindex-state@v1` entry, and signed Input Log checkpoint + consistency proof) to witnesses and monitoring channels.
 
-### 2.4 Adversarial Threat Vector Matrix
+### 1.3 Adversarial Threat Matrix
 
 | Threat Vector | Adversary Action | Detection Mechanism | Auditor Action |
 | :--- | :--- | :--- | :--- |
-| **Operator Equivocation** | Index operator serves conflicting Output Log checkpoints to different auditors or witnesses. | Output Log checkpoint policy verification; Merkle consistency proofs between Output Log checkpoints. | Audit loop halts immediately; alert logged; database frozen. |
-| **Tree Size Rollback** | Index operator serves an Output Log checkpoint (or `input-size` commitment) smaller than previously audited watermarks. | Monotonic `output_size` and `prev_size <= input_size <= latest_input_size` assertions during audit poll. | Audit loop halts; watermarks frozen; `/healthz` remains HTTP 200; `/readyz` reports `503` degraded status. |
-| **Forged MPT Root (Omission)** | Index operator commits an invalid `mpt_root` in an Output Log entry to hide or fabricate records. | Local MPT reconstruction from authenticated Input Log entries; root equality check against the Output Log entry. | Sets root mismatch alert metrics; discards uncommitted batch and freezes disk state; `/readyz` reports `503` degraded status. |
-| **Corrupted Input Entries** | Network attacker or corrupted CDN alters raw Input Log entry bundles. | Entry bundle Merkle authentication fails against `input_root` / `latest_input_root` verified under the signed Input Log checkpoint. | Pipeline rejects entry bundle; retries transient fetch errors without advancing state. |
-| **Unauthenticated Output Entries** | Index operator serves Output Log entry bundles that do not match the Output Log checkpoint root. | `tlog-tiles` entry bundle Merkle authentication fails against the Output Log checkpoint root hash. | Entry bundle rejected; audit loop terminates with an authentication error. |
-| **Parameter Drift (`input-origin` / `from`)** | Index operator publishes an Output Log state commitment altering `input-origin` or `from`. | State commitment parser checks `input-origin` and `from` against the auditor's configured parameters on every Output Log entry. | Audit loop halts immediately; state frozen; alerts emitted. |
-
-### 2.5 In-Situ Invariants & Performance Optimizations
-
-- **[Correctness Invariant] Strict Root Equality Assertion**:
-  - *Rule*: For every processed Output Log entry, the candidate `mpt_root` computed from authenticated Input Log entries in `[from, input_size)` must equal the `mpt_root` committed in the `c2sp.org/tlog-vindex-state@v1` payload.
-  - *Rationale*: Guarantees that the index operator's published index state is 100% faithful to the Input Log.
-  - *Consequence ("Or Else")*: Accepting mismatched roots would allow a malicious or buggy index operator to conceal or fabricate key occurrences without detection.
-
-- **[Correctness Invariant] Monotonic Progression & Log Consistency**:
-  - *Rule*: Each successive Output Log entry must satisfy `from <= prev_size <= input_size <= latest_input_size`, Merkle consistency across consecutive Output Log checkpoints, and Merkle consistency of `(input_size, input_root)` against the verified signed Input Log checkpoint `(latest_input_size, latest_input_root)`.
-  - *Rationale*: Transparency logs are append-only; historical tree prefixes and sizes cannot shrink or rewrite prior entries.
-  - *Consequence ("Or Else")*: An index operator or upstream log could roll back or rewrite historical entries undetected.
-
-- **[Performance Optimization] High-Throughput Catch-Up Architecture**:
-  - *Mechanism*: Reuses the core batching pipeline (256-entry bundle fetching, Wazero worker pool, and KV batch staging).
-  - *Impact*: Sustains 90,000 to 240,000+ entries/sec, allowing a newly provisioned auditor to catch up over tens of millions of historical Input Log entries in hours.
-
-### 2.6 Operational Runbook: Responding to Mismatches
-When a root mismatch alert fires (mismatch metric `== 1` or `/readyz` returning `HTTP 503` with `"auditor root hash mismatch"`):
-1. **Triage & Containment**: The auditor has automatically halted forward sync and frozen database state on disk. Do not restart the auditor with cleared storage, as the disk preserves forensic state immediately prior to the divergent Output Log entry.
-2. **Inspect Structured Logs**: Examine auditor logs and `/readyz` diagnostics to record the divergent output entry index, target `input_size`, `local_root`, and `committed_root`.
-3. **Forensic State Extraction**: Inspect local Pebble DB inverted chunks (`'c'`) and compare against raw Input Log entries in `[prev_size, input_size)` to determine whether the index operator omitted entries, altered canonical keys, or suffered a non-deterministic `MapFn` bug.
-4. **Reproduce via Standalone One-Shot Audit**: Run the auditor in one-shot mode with an isolated scratch directory against the target Output Log checkpoint to confirm deterministic reproducibility.
-5. **Publish Misbehavior Bundle**: If `MapFn` and the Input Log entries are valid, publish the cryptographic proof bundle (witnessed Output Log checkpoint, Output Log inclusion proof, raw `c2sp.org/tlog-vindex-state@v1` entry, and the signed Input Log checkpoint + consistency proof) to transparency witnesses and public monitoring channels.
-
-### 2.7 Auditor Contract
-
-The auditor subsystem provides continuous full-log state verification:
-
-- **Inputs**:
-  - Output Log URL (`<output-log-url>`), expected `<output-log-origin>`, and Output Log checkpoint verification policy.
-  - Expected `<input-log-origin>`, Input Log checkpoint & entry retrieval endpoint, and Input Log checkpoint verification policy (used to verify signed Input Log checkpoints, `(input_size, input_root)` consistency proofs, and entry bundles).
-  - Compiled WASM `MapFn` module (pinned out-of-band by the auditor operator) and configured start index `from` (default `0`).
-  - Local Pebble DB and MPT storage directories.
-  - Internal operational listener serving `/healthz`, `/readyz`, `/metrics`, and `/debug/pprof/*`.
-- **Outputs**:
-  - Continuous audit telemetry and `/readyz` JSON diagnostics on the internal operational listener.
-- **Safety Guarantees**:
-  - Never signs or publishes Output Log checkpoints.
-  - Never commits unverified state to disk: candidate MPT roots are predicted from in-memory staged `(canonicalKey, value_root)` mappings and checked against the Output Log entry commitment before applying the staged Pebble batch, mutating the verified MPT, or advancing watermarks.
-  - Immediately halts forward sync and preserves forensic state on any checkpoint policy failure, Merkle consistency failure, tree size regression, `input-origin` or `from` mismatch, entry bundle authentication failure, invalid canonical key emission, or `mpt_root` mismatch.
+| **Operator Equivocation** | Serves conflicting Output Log checkpoints to different auditors or witnesses. | Output Log checkpoint policy verification and Merkle consistency proofs between Output Log checkpoints. | Halts audit loop; logs alert; freezes database. |
+| **Tree Size Rollback** | Serves an Output Log checkpoint (or `input-size` commitment) smaller than previously audited watermarks. | Monotonic `output_size` and `prev_size <= input_size <= latest_input_size` assertions. | Halts audit loop; freezes watermarks; `/readyz` reports `503`. |
+| **Forged MPT Root (Omission)** | Commits an invalid `mpt_root` in an Output Log entry to hide or fabricate records. | Local MPT root calculation from authenticated Input Log entries compared against `mpt_root`. | Freezes disk state; sets mismatch metric; `/readyz` reports `503`. |
+| **Corrupted Input Entries** | Alters raw Input Log entry bundles in transit or on CDN. | Entry bundle Merkle authentication fails against verified `input_root` / `latest_input_root`. | Rejects bundle; retries transient fetch errors without advancing state. |
+| **Unauthenticated Output Entries** | Serves Output Log entry bundles that do not match the Output Log checkpoint root. | `tlog-tiles` entry bundle Merkle authentication fails against Output Log checkpoint root. | Rejects bundle; terminates audit loop with authentication error. |
+| **Parameter Drift (`input-origin` / `from`)** | Publishes an Output Log state commitment altering `input-origin` or `from`. | Checks `input-origin` and `from` against configured parameters on every Output Log entry. | Halts audit loop immediately; freezes state; emits alerts. |
 
 ---
 
-## 3. Alternatives Considered (or Tried)
+## 2. Alternatives Considered
 
-### 3.1 Lookup Client Verification Alone vs. Full-Log Independent Auditing
-- **Proposed**: Relying exclusively on lookup clients (`vindex/client`) to verify individual query responses, omitting a full-log auditor.
-- **Theoretical Rejection**: Lookup client verification proves inclusion or non-inclusion against `mpt_root` only when a key is queried, and cannot verify that `mpt_root` itself was faithfully constructed from the Input Log without omissions across unqueried keys.
-- **Chosen Design**: Complementary verification: lightweight lookup client SDK ([`client/`](../../client/README.md)) for per-query proof verification against witnessed checkpoints, paired with `vindex/internal/auditor` for continuous full-log replay auditing.
+### 2.1 Lookup Client Verification Alone vs. Full-Log Independent Auditing
+- **Proposed**: Relying solely on lookup clients ([`client/`](../../client/README.md)) to verify individual query responses without running a full-log auditor.
+- **Rejection**: Lookup clients verify proofs against `mpt_root` only for queried keys and cannot detect whether `mpt_root` omitted or fabricated entries across unqueried keys.
+- **Chosen Design**: Complementary verification: per-query proof verification in [`client/`](../../client/README.md) paired with continuous full-log replay auditing in `vindex/internal/auditor` (and independent clean-room auditors).
 
-### 3.2 Ephemeral In-Memory Auditing vs. State-Preserving Forensic Freezing
-- **Proposed**: Storing auditor state ephemerally in RAM or wiping local database files upon detecting an upstream error.
-- **Operational Rejection**: Wiping or discarding state upon detecting a forged `mpt_root` destroys the exact pre-divergence state needed to pinpoint omitted Input Log entries and produce a reproducible misbehavior report against the index operator.
-- **Chosen Design**: State-preserving halt: the auditor freezes verified Pebble DB and MPT files in-place, exposes structured JSON diagnostics on `/readyz`, keeps `/healthz` at `HTTP 200 OK` so orchestrators do not restart the halted process, and stops forward sync.
+### 2.2 Ephemeral In-Memory Auditing vs. State-Preserving Forensic Freeze
+- **Proposed**: Storing auditor state purely in RAM or wiping local database files upon detecting a divergence.
+- **Rejection**: Destroys the local state needed to isolate which Input Log entries were omitted or corrupted in `[prev_size, input_size)`.
+- **Chosen Design**: State-preserving halt that freezes local Pebble and MPT files in-place without advancing verified watermarks.
 
 ---
 
-## 4. Verification Gate
-
-All auditor replay, checkpoint policy verification, and root mismatch forensic freeze tests are verified via:
+## 3. Verification Gate
 
 ```bash
 go test -race ./vindex/internal/auditor/...
