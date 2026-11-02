@@ -243,8 +243,8 @@ example.com/outputlog
 13
 jR10gZzRRHNJbpwE1qNYfgk7jAv2Ta+5Ud8SpKcWZ6w=
 
-- example.com/outputlog opLqBQsREYCgu6xQkYQwJr9fo45a62DN9EdmHXnZdXNqlcVGlCum2Wks+49/V6267UEjw6QUXTS5Rovnzv++qbSzm9Q=
-- witness.example/w1 CMp+6LWBU0anHGH5aNDTJkH/gj79sG+T6+iP2ThYN5krrDJbR1HDnucjL39QsZTSvVjyQLrdk3DXDqI5G2HgLatVs0pWh6Up69HVOw==
+— example.com/outputlog opLqBQsREYCgu6xQkYQwJr9fo45a62DN9EdmHXnZdXNqlcVGlCum2Wks+49/V6267UEjw6QUXTS5Rovnzv++qbSzm9Q=
+— witness.example/w1 CMp+6LWBU0anHGH5aNDTJkH/gj79sG+T6+iP2ThYN5krrDJbR1HDnucjL39QsZTSvVjyQLrdk3DXDqI5G2HgLatVs0pWh6Up69HVOw==
 ```
 
 #### Binary MPT proofs
@@ -335,7 +335,7 @@ To authenticate the state commitment in a `keys` response:
 
 3. Verify the `c2sp.org/tlog-proof@v1` block against that leaf hash, `<output-log-origin>`, and the client's output log checkpoint verification policy according to [tlog-proof][]. Let `output_size` be the verified output log checkpoint tree size. Check that `output_size >= 1` and that the proven entry `index` equals `output_size - 1`.
 
-4. Parse `state_entry` as a `c2sp.org/tlog-vindex-state@v1` record (see [Output log entries](#output-log-entries)) to obtain `input_origin`, `from`, `input_size`, `input_root`, and `mpt_root`. Check that `input_origin` equals the client's configured `<input-log-origin>` and that `0 <= from <= input_size`. If `from = input_size`, check that `mpt_root` equals `empty_mpt_hash`. Because a lookup response only attests to input log entries in `[from, input_size)`, callers that require coverage back to a specific entry index MUST check that `from` does not exceed that bound.
+4. Parse `state_entry` as a `c2sp.org/tlog-vindex-state@v1` record (see [Output log entries](#output-log-entries)) to obtain `input_origin`, `from`, `input_size`, `input_root`, and `mpt_root`. Check that `input_origin` equals the client's configured `<input-log-origin>` and that `0 <= from <= input_size`. Because a lookup response only attests to input log entries in `[from, input_size)`, callers that require coverage back to a specific entry index MUST check that `from` does not exceed that bound.
 
    If the client subsequently fetches matched entries from the input log, it MUST authenticate those entries against `(input_size, input_root)` according to the input log's specification, and unless relying solely on the witnessed output log and auditors for input log checkpoint validity, verify that `(input_size, input_root)` is Merkle-consistent with a signed input log [checkpoint][] verified under its input log policy.
 

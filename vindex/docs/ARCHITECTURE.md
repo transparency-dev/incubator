@@ -20,16 +20,16 @@ VIndex operates as a **Map Sandwich** bounded between two append-only transparen
 
 Data flows sequentially through five stages governed by a central coordinator, verified externally by lookup clients and independent auditors:
 
-| Stage / Role                 | Responsibility                                                                                                                                                                                                                          |
-| :--------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **1. Ingest & Bundle Cache** | Polls Input Log checkpoints, verifies checkpoint policies and Merkle consistency, downloads and authenticates entry bundles into a local disk cache, and prunes cached bundles once downstream storage and MPT state are durable.       |
-| **2. Sandboxed Mapping**     | Executes the index's deterministic mapping function inside a zero-I/O WebAssembly sandbox pool, validating emitted [canonical keys](./tlog-vindex.md#canonical-keys) and resequencing mapped batches into strict Input Log entry order. |
-| **3. Value-Log Storage**     | Partitions each key's matching Input Log entry indices into append-only chunks in an embedded LSM key-value store, precomputing RFC 6962 compact range hashes and syncing updates to disk at target checkpoint barriers.                |
-| **4. State Commitment**      | Predicts the candidate `mpt_root` over un-hashed canonical keys under a shared read lock, appends the state commitment entry to the Output Log, collects witness cosignatures, and atomically swaps the active serving snapshot.        |
-| **5. Read Serving**          | Serves `<index-url>/keys` (exact key and bounded prefix proofs from the in-memory MPT) and `<index-url>/values` (lock-free backward value-log pagination from the KV store), strictly isolated to witnessed snapshots.                  |
-| **Coordinator**              | Freezes target Input Log checkpoints, drives stages 1–4 in monotonic order, governs safe cache-pruning watermarks, and runs Zero-WAL startup recovery.                                                                                  |
-| **Lookup Client**            | Queries `/keys` and `/values` and verifies Output Log inclusion proofs, MPT inclusion/non-inclusion/prefix proofs, and value-log compact range roots offline against an Output Log checkpoint verification policy.                      |
-| **Independent Auditor**      | Tails the Output Log from entry `0`, verifies Input Log and Output Log checkpoints, independently replays Input Log entries from `from` through the mapping function, and halts and alerts if any published `mpt-root` diverges.        |
+| Stage / Role                                                 | Responsibility                                                                                                                                                                                                                          |
+| :----------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**1. Ingest & Bundle Cache**](../internal/ingest/README.md) | Polls Input Log checkpoints, verifies checkpoint policies and Merkle consistency, downloads and authenticates entry bundles into a local disk cache, and prunes cached bundles once downstream storage and MPT state are durable.       |
+| [**2. Sandboxed Mapping**](../mapfn/README.md)               | Executes the index's deterministic mapping function inside a zero-I/O WebAssembly sandbox pool, validating emitted [canonical keys](./tlog-vindex.md#canonical-keys) and resequencing mapped batches into strict Input Log entry order. |
+| [**3. Value-Log Storage**](../internal/kvstore/README.md)    | Partitions each key's matching Input Log entry indices into append-only chunks in an embedded LSM key-value store, precomputing RFC 6962 compact range hashes and syncing updates to disk at target checkpoint barriers.                |
+| [**4. State Commitment**](../internal/tree/README.md)        | Predicts the candidate `mpt_root` over un-hashed canonical keys under a shared read lock, appends the state commitment entry to the Output Log, collects witness cosignatures, and atomically swaps the active serving snapshot.        |
+| [**5. Read Serving**](../internal/server/README.md)          | Serves `<index-url>/keys` (exact key and bounded prefix proofs from the in-memory MPT) and `<index-url>/values` (lock-free backward value-log pagination from the KV store), strictly isolated to witnessed snapshots.                  |
+| [**Coordinator**](../internal/coordinator/README.md)         | Freezes target Input Log checkpoints, drives stages 1–4 in monotonic order, governs safe cache-pruning watermarks, and runs Zero-WAL startup recovery.                                                                                  |
+| [**Lookup Client**](../client/README.md)                     | Queries `/keys` and `/values` and verifies Output Log inclusion proofs, MPT inclusion/non-inclusion/prefix proofs, and value-log compact range roots offline against an Output Log checkpoint verification policy.                      |
+| [**Independent Auditor**](../internal/auditor/README.md)     | Tails the Output Log from entry `0`, verifies Input Log and Output Log checkpoints, independently replays Input Log entries from `from` through the mapping function, and halts and alerts if any published `mpt-root` diverges.        |
 
 ---
 
@@ -89,7 +89,7 @@ Ecosystem authors express mapping logic as a deterministic function from raw Inp
 
 VIndex separates trie structure from per-key occurrence lists using a **hybrid keying model**:
 
-- The **MPT** indexes **un-hashed variable-length canonical keys** directly so keys sharing a string prefix form a contiguous subtrie for [two-sided prefix proofs](./tlog-vindex.md#verifying-a-keys-response).
+- The **MPT** indexes **un-hashed variable-length canonical keys** directly so keys sharing a string prefix form a contiguous subtrie for [prefix subtree proofs with two-sided verification](./tlog-vindex.md#two-sided-prefix-verification).
 - The **KV store** indexes per-key value-log chunks by fixed-size **`SHA-256(key)` digests** computed on the host, keeping LSM keys uniform and decoupled from variable canonical key lengths.
 
 Within the KV store, each key's matching `entry_idx` sequence is partitioned into fixed-window chunks ordered newest-first under `SHA-256(key)`. Each chunk stores the RFC 6962 compact range hashes of all older occurrences preceding that chunk alongside compact relative offsets within the window:
