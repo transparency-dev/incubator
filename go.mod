@@ -1,10 +1,12 @@
 module github.com/transparency-dev/incubator
 
-go 1.26.0
+go 1.27.0
+
+toolchain go1.27.3
 
 require (
-	filippo.io/sunlight v0.9.0
-	filippo.io/torchwood v0.9.1-0.20260708154658-e0a6396dd50c
+	filippo.io/sunlight v0.10.2
+	filippo.io/torchwood v0.10.1-0.20261024135344-1c05157b1fd2
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/google/go-cmp v0.7.0
@@ -19,7 +21,7 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.47.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.62.0
 	golang.org/x/sync v0.24.0
 	k8s.io/klog/v2 v2.140.0
 )
