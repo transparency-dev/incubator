@@ -6,8 +6,12 @@
 /logandmap
 /sumdbindex
 /sumdbverify
+/vindexd
 
 # Go test binaries and coverage/profile outputs
 *.test
 *.out
 *.prof
+
+# WebAssembly binaries
+*.wasm
