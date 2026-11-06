@@ -24,7 +24,6 @@ import (
 	"io"
 	"os"
 	"slices"
-	"strings"
 
 	"github.com/transparency-dev/incubator/vindex/internal/wasmhost"
 )
@@ -46,22 +45,18 @@ func runTestCmd(ctx context.Context, args []string) error {
 	inputStr := fs.String("input", "", "Literal string input payload.")
 	inputFile := fs.String("input_file", "", "Path to file containing input leaf payload.")
 	inputHex := fs.String("hex", "", "Hex-encoded input leaf payload.")
-	bundleSize := fs.Int("bundle_size", 256, "Number of leaves per bundle execution (defaults to 256).")
+	bundleSize := fs.Int("bundle_size", int(wasmhost.DefaultBundleSize), "Number of leaves per bundle execution (defaults to 256).")
 	format := fs.String("format", "plain", "Output format: plain or json.")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if *bundleSize <= 0 {
-		*bundleSize = 256
+		*bundleSize = int(wasmhost.DefaultBundleSize)
 	}
 
 	if *wasmPath == "" {
-		if fs.NArg() > 0 && (strings.HasSuffix(fs.Arg(0), ".wasm") || *inputStr != "") {
-			*wasmPath = fs.Arg(0)
-		} else {
-			return errors.New("--wasm flag is required")
-		}
+		return errors.New("--wasm flag is required")
 	}
 
 	wasmBytes, err := os.ReadFile(*wasmPath)
@@ -90,15 +85,6 @@ func runTestCmd(ctx context.Context, args []string) error {
 		inputBytes = b
 	} else if *inputStr != "" {
 		inputBytes = []byte(*inputStr)
-	} else if fs.NArg() > 0 {
-		// Positional argument as input string
-		arg := fs.Arg(0)
-		if arg == *wasmPath && fs.NArg() > 1 {
-			arg = fs.Arg(1)
-		}
-		if arg != *wasmPath {
-			inputBytes = []byte(arg)
-		}
 	}
 
 	wasmHost, err := wasmhost.NewWASMHost(ctx, wasmBytes, 1)

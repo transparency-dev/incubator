@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package wasmhost
+// Package wasmtest provides compiled WASM guest fixtures for VIndex tests.
+package wasmtest
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -44,26 +44,12 @@ var compileTestGuestOnce = sync.OnceValues(func() ([]byte, error) {
 	return os.ReadFile(wasmPath)
 })
 
-var sharedTestHostOnce = sync.OnceValues(func() (*WASMHost, error) {
-	return NewWASMHost(context.Background(), TestWASMBytes(), 0)
-})
-
-// TestWASMBytes compiles and returns the WebAssembly guest module in testdata/testguest
+// Bytes compiles and returns the WebAssembly guest module in testdata/testguest
 // built with the VIndex MapFn SDK (sdk.RegisterEmit).
-func TestWASMBytes() []byte {
+func Bytes() []byte {
 	b, err := compileTestGuestOnce()
 	if err != nil {
 		panic(err)
 	}
 	return b
-}
-
-// TestWASMHost returns a shared, process-wide WASMHost running TestWASMBytes()
-// for tests that do not close the host directly.
-func TestWASMHost() *WASMHost {
-	h, err := sharedTestHostOnce()
-	if err != nil {
-		panic(err)
-	}
-	return h
 }

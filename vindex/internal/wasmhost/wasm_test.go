@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/transparency-dev/incubator/vindex/internal/wasmhost/wasmtest"
 )
 
 func TestWASMHost_PreimageKeysAndDeduplication(t *testing.T) {
@@ -35,7 +35,7 @@ func TestWASMHost_PreimageKeysAndDeduplication(t *testing.T) {
 	hBeta := sha256.Sum256([]byte("key_beta"))
 	hAlpha := sha256.Sum256([]byte("key_alpha"))
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 2)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 2)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -51,15 +51,15 @@ func TestWASMHost_PreimageKeysAndDeduplication(t *testing.T) {
 		{Key: "key_beta", KeyHash: hBeta},
 	}}
 
-	if diff := cmp.Diff(expected, results); diff != "" {
-		t.Fatalf("MapBundle diff (-want +got):\n%s", diff)
+	if !slices.EqualFunc(results, expected, slices.Equal) {
+		t.Fatalf("MapBundle = %+v, want %+v", results, expected)
 	}
 }
 
 func TestWASMHost_EmptyOutput(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestWASMHost_EmptyOutput(t *testing.T) {
 func TestWASMHost_UnreachableTrap(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestWASMHost_UnreachableTrap(t *testing.T) {
 func TestWASMHost_MalformedOutput(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestWASMHost_ConcurrentExecution(t *testing.T) {
 	ctx := context.Background()
 
 	h1 := sha256.Sum256([]byte("concurrent_key"))
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 4)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 4)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestWASMHost_ConcurrentExecution(t *testing.T) {
 func TestWASMHost_ClosedHost(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestWASMHost_MissingInputBufferExport(t *testing.T) {
 
 	// Rename the 12-byte export "input_buffer" to "other_buffer" so the binary
 	// remains valid WASM but lacks the required "input_buffer" export.
-	wasmBytes := bytes.ReplaceAll(slices.Clone(TestWASMBytes()), []byte("input_buffer"), []byte("other_buffer"))
+	wasmBytes := bytes.ReplaceAll(slices.Clone(wasmtest.Bytes()), []byte("input_buffer"), []byte("other_buffer"))
 
 	_, err := NewWASMHost(ctx, wasmBytes, 1)
 	if err == nil {
@@ -180,7 +180,7 @@ func TestWASMHost_MissingMapBundleExport(t *testing.T) {
 
 	// Rename the 10-byte export "map_bundle" to "other_func" so the binary
 	// remains valid WASM but lacks the required "map_bundle" export.
-	wasmBytes := bytes.ReplaceAll(slices.Clone(TestWASMBytes()), []byte("map_bundle"), []byte("other_func"))
+	wasmBytes := bytes.ReplaceAll(slices.Clone(wasmtest.Bytes()), []byte("map_bundle"), []byte("other_func"))
 
 	_, err := NewWASMHost(ctx, wasmBytes, 1)
 	if err == nil {
@@ -194,7 +194,7 @@ func TestWASMHost_MissingMapBundleExport(t *testing.T) {
 func TestWASMHost_Timeout(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -218,40 +218,10 @@ func TestWASMHost_Timeout(t *testing.T) {
 	}
 }
 
-func TestWASMHost_MapBundle(t *testing.T) {
-	ctx := context.Background()
-
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 2)
-	if err != nil {
-		t.Fatalf("NewWASMHost failed: %v", err)
-	}
-	defer func() { _ = host.Close(ctx) }()
-
-	leaves := [][]byte{
-		[]byte("leaf0"),
-		[]byte("leaf1"),
-		[]byte("leaf2"),
-		[]byte("leaf3"),
-	}
-
-	results, err := host.MapBundle(ctx, leaves)
-	if err != nil {
-		t.Fatalf("MapBundle failed: %v", err)
-	}
-	if len(results) != len(leaves) {
-		t.Fatalf("expected %d bundle results, got %d", len(leaves), len(results))
-	}
-	for i, r := range results {
-		if len(r) != 1 {
-			t.Fatalf("leaf %d expected 1 entry, got %d", i, len(r))
-		}
-	}
-}
-
 func TestWASMHost_MapBundle_PreimagesAndHardwareHashing(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 2)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 2)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -301,7 +271,7 @@ func TestWASMHost_MapBundle_PreimagesAndHardwareHashing(t *testing.T) {
 
 func BenchmarkWASMHost_MapBundle(b *testing.B) {
 	ctx := context.Background()
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 4)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 4)
 	if err != nil {
 		b.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -324,7 +294,7 @@ func BenchmarkWASMHost_MapBundle(b *testing.B) {
 
 func BenchmarkWASMRunner_MapBundle(b *testing.B) {
 	ctx := context.Background()
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 4)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 4)
 	if err != nil {
 		b.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -347,44 +317,6 @@ func BenchmarkWASMRunner_MapBundle(b *testing.B) {
 		_, err := runner.MapBundle(ctx, leaves)
 		if err != nil {
 			b.Fatalf("runner.MapBundle failed: %v", err)
-		}
-	}
-}
-
-func BenchmarkDecodeBundleOutput(b *testing.B) {
-	const leavesCount = 256
-	const keysPerLeaf = 2
-	var outBuf bytes.Buffer
-	var countBuf [4]byte
-	binary.LittleEndian.PutUint32(countBuf[:], leavesCount)
-	outBuf.Write(countBuf[:])
-
-	for i := 0; i < leavesCount; i++ {
-		var kc [4]byte
-		binary.LittleEndian.PutUint32(kc[:], keysPerLeaf)
-		outBuf.Write(kc[:])
-	}
-
-	domain1 := []byte("example.com")
-	domain2 := []byte("sub.example.org")
-	for i := 0; i < leavesCount; i++ {
-		var k1Len, k2Len [4]byte
-		binary.LittleEndian.PutUint32(k1Len[:], uint32(len(domain1)))
-		outBuf.Write(k1Len[:])
-		outBuf.Write(domain1)
-
-		binary.LittleEndian.PutUint32(k2Len[:], uint32(len(domain2)))
-		outBuf.Write(k2Len[:])
-		outBuf.Write(domain2)
-	}
-
-	rawOutput := outBuf.Bytes()
-	b.ReportAllocs()
-
-	for b.Loop() {
-		res, err := decodeBundleOutput(rawOutput, leavesCount)
-		if err != nil || len(res) != leavesCount {
-			b.Fatalf("decodeBundleOutput failed: %v", err)
 		}
 	}
 }
@@ -434,7 +366,7 @@ func BenchmarkDecodeBundleOutputInto(b *testing.B) {
 func TestWASMRunner_DedicatedExecution(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 2)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 2)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -460,7 +392,7 @@ func TestWASMRunner_ConcurrentDedicatedRunners(t *testing.T) {
 	ctx := context.Background()
 
 	concurrency := 8
-	host, err := NewWASMHost(ctx, TestWASMBytes(), concurrency)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), concurrency)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -511,7 +443,7 @@ func TestDecodeBundleOutput_BoundsCheck(t *testing.T) {
 	binary.LittleEndian.PutUint32(outBuf[0:4], 1)
 	binary.LittleEndian.PutUint32(outBuf[4:8], 1_000_000)
 
-	_, err := decodeBundleOutput(outBuf, 1)
+	_, _, err := decodeBundleOutputInto(nil, nil, outBuf, 1)
 	if err == nil {
 		t.Fatal("expected error for totalKeys exceeding buffer capacity, got nil")
 	}
@@ -583,7 +515,7 @@ func TestDecodeBundleOutputInto_KeyLenOverflow(t *testing.T) {
 func TestWASMHost_MapBundle_ZeroLenSlabOverflowFailsFast(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -602,7 +534,7 @@ func TestWASMHost_MapBundle_ZeroLenSlabOverflowFailsFast(t *testing.T) {
 func TestWASMRunner_TrapDiscardsBrokenInstanceAndRecovers(t *testing.T) {
 	ctx := context.Background()
 
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -672,7 +604,7 @@ func TestDecodeBundleOutputInto_TrailingUnconsumedBytes(t *testing.T) {
 
 func TestWASMRunner_FailsSubsequentCallsAfterError(t *testing.T) {
 	ctx := context.Background()
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 1)
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
 	if err != nil {
 		t.Fatalf("NewWASMHost failed: %v", err)
 	}
@@ -689,51 +621,6 @@ func TestWASMRunner_FailsSubsequentCallsAfterError(t *testing.T) {
 	}
 	if _, err := runner.MapBundle(ctx, [][]byte{[]byte("second")}); !errors.Is(err, ErrWasmHalt) {
 		t.Fatalf("expected ErrWasmHalt on subsequent MapBundle after failure, got %v", err)
-	}
-}
-
-func TestWASMHost_TestWASMBytes(t *testing.T) {
-	ctx := context.Background()
-	host, err := NewWASMHost(ctx, TestWASMBytes(), 2)
-	if err != nil {
-		t.Fatalf("NewWASMHost(TestWASMBytes) failed: %v", err)
-	}
-	defer func() { _ = host.Close(ctx) }()
-
-	leaves := [][]byte{
-		[]byte("single_key"),
-		[]byte("shared_key #leaf1"),
-		[]byte("news\ntech\nnews"),
-		[]byte("   \n\t  "),
-		nil,
-	}
-	res, err := host.MapBundle(ctx, leaves)
-	if err != nil {
-		t.Fatalf("MapBundle failed: %v", err)
-	}
-	if len(res) != 5 {
-		t.Fatalf("got %d results, want 5", len(res))
-	}
-	if len(res[0]) != 1 || res[0][0].Key != "single_key" {
-		t.Fatalf("leaf 0 = %+v, want [single_key]", res[0])
-	}
-	if len(res[1]) != 1 || res[1][0].Key != "shared_key" {
-		t.Fatalf("leaf 1 = %+v, want [shared_key]", res[1])
-	}
-	if len(res[2]) != 2 {
-		t.Fatalf("leaf 2 = %+v, want 2 deduplicated keys", res[2])
-	}
-	if len(res[3]) != 0 || len(res[4]) != 0 {
-		t.Fatalf("leaves 3,4 = %+v, %+v, want empty", res[3], res[4])
-	}
-
-	// Control byte 0x01 triggers ErrMalformedOutput
-	if _, err := host.MapBundle(ctx, [][]byte{[]byte("\x01bad")}); !errors.Is(err, ErrMalformedOutput) {
-		t.Fatalf("expected ErrMalformedOutput on 0x01 byte, got %v", err)
-	}
-	// NUL byte 0x00 triggers ErrWasmHalt
-	if _, err := host.MapBundle(ctx, [][]byte{[]byte("\x00trap")}); !errors.Is(err, ErrWasmHalt) {
-		t.Fatalf("expected ErrWasmHalt on 0x00 byte, got %v", err)
 	}
 }
 

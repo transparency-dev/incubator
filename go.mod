@@ -5,7 +5,6 @@ go 1.27.0
 toolchain go1.27.3
 
 require (
-	github.com/google/go-cmp v0.7.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/tetratelabs/wazero v1.12.0
 	github.com/transparency-dev/formats v0.1.2-0.20261027211732-55fe9bf0fa53

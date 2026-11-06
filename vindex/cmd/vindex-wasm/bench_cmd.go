@@ -32,7 +32,7 @@ func runBenchCmd(ctx context.Context, args []string) error {
 	wasmPath := fs.String("wasm", "", "Path to compiled WASM plugin file (required).")
 	inputStr := fs.String("input", "github.com/example/benchmodule v1.2.3 h1:benchHash123456789=\n", "Benchmark input leaf payload.")
 	inputFile := fs.String("input_file", "", "Path to file containing input leaf payload.")
-	bundleSize := fs.Int("bundle_size", 256, "Number of leaves per bundle (defaults to 256).")
+	bundleSize := fs.Int("bundle_size", int(wasmhost.DefaultBundleSize), "Number of leaves per bundle (defaults to 256).")
 	iterations := fs.Int("iterations", 1000, "Total number of bundle executions.")
 	workers := fs.Int("workers", 4, "Number of concurrent worker goroutines and pool size.")
 
@@ -47,7 +47,7 @@ func runBenchCmd(ctx context.Context, args []string) error {
 		return errors.New("--iterations must be greater than 0")
 	}
 	if *bundleSize <= 0 {
-		*bundleSize = 256
+		*bundleSize = int(wasmhost.DefaultBundleSize)
 	}
 	if *workers <= 0 {
 		*workers = 1

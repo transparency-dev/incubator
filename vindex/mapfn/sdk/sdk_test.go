@@ -50,12 +50,9 @@ func packBundleInput(leaves [][]byte) []byte {
 }
 
 func TestArena_InputBufferAndSliceBounds(t *testing.T) {
-	base := inputBufferPtr()
+	base := inputBuffer()
 	if base == 0 {
-		t.Fatal("expected non-zero inputBufferPtr pointer")
-	}
-	if got := inputBuffer(); got != base {
-		t.Fatalf("inputBuffer() = %d, want %d", got, base)
+		t.Fatal("expected non-zero inputBuffer pointer")
 	}
 
 	// Test writing and reading via getInputSlice
@@ -109,7 +106,7 @@ func TestPackBundleInput_And_ExecuteBundle_Emit(t *testing.T) {
 		t.Fatal("packBundleInput returned empty buffer")
 	}
 
-	ptr := inputBufferPtr()
+	ptr := inputBuffer()
 	copy(getInputSlice(ptr, uint32(len(packedInput))), packedInput)
 
 	outPtr, outLen := executeBundle(ptr, uint32(len(packedInput)))
@@ -147,7 +144,7 @@ func TestExecuteBundle_EmitSingle(t *testing.T) {
 	leaves := [][]byte{[]byte("example.com")}
 	packedInput := packBundleInput(leaves)
 
-	ptr := inputBufferPtr()
+	ptr := inputBuffer()
 	copy(getInputSlice(ptr, uint32(len(packedInput))), packedInput)
 
 	outPtr, outLen := executeBundle(ptr, uint32(len(packedInput)))
@@ -179,7 +176,7 @@ func TestExecuteBundle_OffsetTableValidation(t *testing.T) {
 
 	leaves := [][]byte{[]byte("example.com")}
 	packedInput := packBundleInput(leaves)
-	ptr := inputBufferPtr()
+	ptr := inputBuffer()
 
 	// 1. OffsetTable[0] != 0 must fail
 	badStart := append([]byte(nil), packedInput...)
@@ -207,7 +204,7 @@ func TestExecuteBundle_EmitOverflow(t *testing.T) {
 	leaves := [][]byte{[]byte("leaf")}
 	packedInput := packBundleInput(leaves)
 
-	ptr := inputBufferPtr()
+	ptr := inputBuffer()
 	copy(getInputSlice(ptr, uint32(len(packedInput))), packedInput)
 
 	outPtr, outLen := executeBundle(ptr, uint32(len(packedInput)))
