@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -70,7 +69,6 @@ func ValidatePreimageKey(keyBytes []byte) error {
 
 // WASMHost manages the lifecycle and execution of a compiled Wazero WebAssembly module.
 type WASMHost struct {
-	runtime  wazero.Runtime
 	compiled wazero.CompiledModule
 	pool     chan *wasmInstance
 	mu       sync.Mutex
@@ -153,7 +151,6 @@ func NewWASMHost(ctx context.Context, wasmBytes []byte, poolSize int) (*WASMHost
 	}
 
 	h := &WASMHost{
-		runtime:  getSharedRuntime(),
 		compiled: compiled,
 		pool:     make(chan *wasmInstance, poolSize),
 	}
@@ -169,12 +166,8 @@ func NewWASMHost(ctx context.Context, wasmBytes []byte, poolSize int) (*WASMHost
 }
 
 func (h *WASMHost) instantiateInstance(ctx context.Context) (*wasmInstance, error) {
-	var id [8]byte
-	_, _ = rand.Read(id[:])
-	modName := fmt.Sprintf("vindex_mod_%x", id)
-
 	wasiConfig := wazero.NewModuleConfig().
-		WithName(modName).
+		WithName("").
 		WithStartFunctions("_initialize").
 		WithStdout(io.Discard).
 		WithStderr(io.Discard).
@@ -185,7 +178,7 @@ func (h *WASMHost) instantiateInstance(ctx context.Context) (*wasmInstance, erro
 		WithNanosleep(func(int64) {}).
 		WithRandSource(zeroReader{})
 
-	mod, err := h.runtime.InstantiateModule(ctx, h.compiled, wasiConfig)
+	mod, err := getSharedRuntime().InstantiateModule(ctx, h.compiled, wasiConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -239,8 +232,8 @@ func (inst *wasmInstance) executeBundle(ctx context.Context, leaves [][]byte) ([
 	if n == 0 {
 		return nil, nil
 	}
-	if n > 256 {
-		return nil, fmt.Errorf("%w: bundle size %d exceeds 256", ErrMalformedOutput, n)
+	if uint64(n) > DefaultBundleSize {
+		return nil, fmt.Errorf("%w: bundle size %d exceeds %d", ErrMalformedOutput, n, DefaultBundleSize)
 	}
 
 	headerLen := 4 + (n+1)*4
@@ -363,8 +356,7 @@ func decodeBundleOutputInto(resultsBuf [][]MappedEntry, entriesBuf []MappedEntry
 			}
 
 			allEntries[curEntryIdx] = MappedEntry{
-				Key:     string(keyBytes),
-				KeyHash: sha256.Sum256(keyBytes),
+				Key: string(keyBytes),
 			}
 			curEntryIdx++
 		}
@@ -377,6 +369,9 @@ func decodeBundleOutputInto(resultsBuf [][]MappedEntry, entriesBuf []MappedEntry
 			entries = slices.CompactFunc(entries, func(a, b MappedEntry) bool {
 				return a.Key == b.Key
 			})
+		}
+		for k := range entries {
+			entries[k].KeyHash = sha256.Sum256([]byte(entries[k].Key))
 		}
 		curEntryIdx = startEntryIdx + len(entries)
 		resultsBuf[i] = entries[:len(entries):len(entries)]
@@ -397,11 +392,6 @@ func (inst *wasmInstance) decodeBundleOutput(outBuf []byte, expectedCount int) (
 	inst.resultsBuf = results
 	inst.entriesBuf = entries
 	return results, nil
-}
-
-func decodeBundleOutput(outBuf []byte, expectedCount int) ([][]MappedEntry, error) {
-	results, _, err := decodeBundleOutputInto(nil, nil, outBuf, expectedCount)
-	return results, err
 }
 
 // MapBundle executes WASM mapping across a contiguous bundle of leaves using a checked-out runner.

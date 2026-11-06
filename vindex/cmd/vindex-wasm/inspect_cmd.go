@@ -35,11 +35,7 @@ func runInspectCmd(ctx context.Context, args []string) error {
 	}
 
 	if *wasmPath == "" {
-		if fs.NArg() > 0 {
-			*wasmPath = fs.Arg(0)
-		} else {
-			return errors.New("--wasm flag is required")
-		}
+		return errors.New("--wasm flag is required")
 	}
 
 	wasmBytes, err := os.ReadFile(*wasmPath)

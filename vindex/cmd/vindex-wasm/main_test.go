@@ -34,14 +34,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/transparency-dev/incubator/vindex/internal/wasmhost"
+	"github.com/transparency-dev/incubator/vindex/internal/wasmhost/wasmtest"
 )
 
 func TestCLI_TestCmd(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	wasmPath := filepath.Join(tmpDir, "test.wasm")
-	if err := os.WriteFile(wasmPath, wasmhost.TestWASMBytes(), 0o644); err != nil {
+	if err := os.WriteFile(wasmPath, wasmtest.Bytes(), 0o644); err != nil {
 		t.Fatalf("failed to write wasm file: %v", err)
 	}
 
@@ -72,18 +72,12 @@ func TestCLI_TestCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("test input_file command failed: %v", err)
 	}
-
-	// 5. Positional input
-	err = run(ctx, []string{"test", "--wasm=" + wasmPath, "positional_arg_leaf"})
-	if err != nil {
-		t.Fatalf("test positional command failed: %v", err)
-	}
 }
 
 func TestCLI_InspectCmd(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	wasmBytes := wasmhost.TestWASMBytes()
+	wasmBytes := wasmtest.Bytes()
 	wasmPath := filepath.Join(tmpDir, "test.wasm")
 	if err := os.WriteFile(wasmPath, wasmBytes, 0o644); err != nil {
 		t.Fatalf("failed to write wasm file: %v", err)
@@ -114,19 +108,13 @@ func TestCLI_InspectCmd(t *testing.T) {
 	if !strings.Contains(outStr, wantHex) {
 		t.Errorf("inspect output missing %q:\n%s", wantHex, outStr)
 	}
-
-	// Positional syntax
-	err = run(ctx, []string{"inspect", wasmPath})
-	if err != nil {
-		t.Fatalf("inspect positional failed: %v", err)
-	}
 }
 
 func TestCLI_BenchCmd(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	wasmPath := filepath.Join(tmpDir, "test.wasm")
-	if err := os.WriteFile(wasmPath, wasmhost.TestWASMBytes(), 0o644); err != nil {
+	if err := os.WriteFile(wasmPath, wasmtest.Bytes(), 0o644); err != nil {
 		t.Fatalf("failed to write wasm file: %v", err)
 	}
 
