@@ -72,10 +72,7 @@ func parseSigner(rawOrPath string) (note.Signer, error) {
 			return nil, errors.New("signer key file is empty")
 		}
 	}
-	if s, _, err := fnote.NewEd25519SignerVerifier(keyStr); err == nil {
-		return s, nil
-	}
-	return note.NewSigner(keyStr)
+	return fnote.NewSigner(keyStr)
 }
 
 func startHTTPListener(addr, label string, handler http.Handler) (string, func(), error) {

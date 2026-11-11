@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex/internal/wasmhost/wasmtest"
 	"github.com/transparency-dev/tessera"
 	"github.com/transparency-dev/tessera/storage/posix"
@@ -75,6 +76,31 @@ func getTestWasm(t *testing.T) string {
 		t.Fatalf("failed to write test wasm: %v", err)
 	}
 	return wasmPath
+}
+
+func TestParseSigner_MLDSA44(t *testing.T) {
+	skey, vkey, err := fnote.GenerateMLDSAKey("test.mldsa.out")
+	if err != nil {
+		t.Fatalf("GenerateMLDSAKey failed: %v", err)
+	}
+	verifier, err := fnote.NewVerifier(vkey)
+	if err != nil {
+		t.Fatalf("fnote.NewVerifier failed: %v", err)
+	}
+	keyFile := filepath.Join(t.TempDir(), "out.key")
+	if err := os.WriteFile(keyFile, []byte(skey+"\n"), 0o600); err != nil {
+		t.Fatalf("failed to write key file: %v", err)
+	}
+
+	for _, in := range []string{skey, keyFile} {
+		signer, err := parseSigner(in)
+		if err != nil {
+			t.Fatalf("parseSigner failed: %v", err)
+		}
+		if signer.Name() != verifier.Name() || signer.KeyHash() != verifier.KeyHash() {
+			t.Fatalf("signer (%s, %08x) does not match verifier (%s, %08x)", signer.Name(), signer.KeyHash(), verifier.Name(), verifier.KeyHash())
+		}
+	}
 }
 
 func TestVindexd_FlagValidation(t *testing.T) {
