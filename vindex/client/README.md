@@ -27,6 +27,15 @@ External Go callers import `vindex/client` exclusively. Shared wire and MPT proo
 ### 1.2 Snapshot-Scoped Client API (`Client`, `LookupResult`, `MatchedKey`)
 
 ```go
+type CheckpointPolicy interface {
+    Verify(checkpoint []byte) (*log.Checkpoint, error)
+}
+
+func ParsePolicy(b []byte) (CheckpointPolicy, error)
+func SingleKeyPolicy(origin string, v note.Verifier) (CheckpointPolicy, error)
+func WitnessPolicy(origin string, v note.Verifier, witnesses []note.Verifier, threshold int) (CheckpointPolicy, error)
+func DomainToCanonicalKey(domain string) (string, error)
+
 type Config struct {
     ExpectedOutputLogOrigin string
     OutputLogPolicy         CheckpointPolicy
@@ -40,14 +49,15 @@ func (c *Client) LookupKey(ctx context.Context, key string) (*LookupResult, erro
 func (c *Client) LookupPrefix(ctx context.Context, prefix string) (*LookupResult, error)
 
 type LookupResult struct {
-    OutputSize  uint64
-    OutputRoot  [32]byte
-    InputOrigin string
-    From        uint64
-    InputSize   uint64
-    InputRoot   [32]byte
-    MPTRoot     [32]byte
-    Keys        []MatchedKey // 0..1 for LookupKey; 0..N (lexicographically sorted) for LookupPrefix
+    OutputOrigin string
+    OutputSize   uint64
+    OutputRoot   [32]byte
+    InputOrigin  string
+    From         uint64
+    InputSize    uint64
+    InputRoot    [32]byte
+    MPTRoot      [32]byte
+    Keys         []MatchedKey // 0..1 for LookupKey; 0..N (lexicographically sorted) for LookupPrefix
 }
 
 type MatchedKey struct {
@@ -58,6 +68,16 @@ type MatchedKey struct {
 
 func (k MatchedKey) Values(ctx context.Context) iter.Seq2[uint64, error]
 
+// Transport-independent offline proof verification:
+type ValuesResponse struct {
+    Preceding    uint64
+    CompactRange [][32]byte
+    Indices      []uint64
+}
+func VerifyKeysResponse(rawBody []byte, target string, isPrefix bool, cfg Config) (*LookupResult, error)
+func VerifyValuesResponse(rawBody []byte, expectedValueRoot [32]byte, from, before uint64) (*ValuesResponse, error)
+func (r *ValuesResponse) NextPage() (before uint64, expectedValueRoot [32]byte, ok bool)
+
 var (
     ErrVerificationFailed = errors.New("vindex: verification failed")
     ErrBadRequest         = errors.New("vindex: bad request")
@@ -66,7 +86,7 @@ var (
 )
 ```
 
-- **Configuration & Transport**: `New` requires non-empty `ExpectedOutputLogOrigin`, non-nil `OutputLogPolicy` (parsed from a [C2SP `tlog-policy`](https://c2sp.org/tlog-policy) witness quorum text file or constructed programmatically from a primary log verifier and witness threshold), and non-empty `ExpectedInputLogOrigin`. `WithHTTPClient` clones the caller-supplied `*http.Client` (preserving custom `Transport`, proxies, TLS settings, and timeouts) while overriding `CheckRedirect` to reject all `3xx` redirects per [`docs/tlog-vindex.md`](../docs/tlog-vindex.md).
+- **Configuration & Transport**: `New` requires a non-nil `OutputLogPolicy` (parsed from a [C2SP `tlog-policy`](https://c2sp.org/tlog-policy) witness quorum text file or constructed programmatically from a primary log verifier and witness threshold), non-empty `ExpectedOutputLogOrigin` (auto-derived from `OutputLogPolicy` when the policy binds a single log origin), and non-empty `ExpectedInputLogOrigin`. `WithHTTPClient` clones the caller-supplied `*http.Client` (preserving custom `Transport`, proxies, TLS settings, and timeouts) while overriding `CheckRedirect` to reject all `3xx` redirects per [`docs/tlog-vindex.md`](../docs/tlog-vindex.md).
 - **Snapshot-Scoped Isolation**: `*Client`, `*LookupResult`, and `MatchedKey` hold zero mutable cross-lookup state. Pagination cursors `(before, expectedValueRoot)` exist strictly as stack-local variables inside each `MatchedKey.Values(ctx)` invocation, allowing a single `*Client` or `MatchedKey` to be used concurrently across goroutines and against load-balanced or short-TTL-cached server replicas where consecutive `/keys` responses may arrive slightly out of order.
 
 ```go
