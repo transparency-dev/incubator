@@ -12,7 +12,7 @@
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        
+
         @keyframes pulse-soft { 
             0%, 100% { opacity: 1; } 
             50% { opacity: 0.5; } 
@@ -26,7 +26,7 @@
         .jump-highlight {
             animation: highlight-fade 2s ease-out forwards;
         }
-        
+
         #sidebar { transition: transform 0.3s ease-in-out; }
         @media (max-width: 768px) {
             #sidebar.hidden-mobile { transform: translateX(-100%); }
@@ -168,7 +168,7 @@
                         </div>
                     </div>
                 </div>
-                
+
                 <!-- Tabbed View: Interpreted vs Hex -->
                 <div class="space-y-4">
                     <div class="flex border-b border-slate-800 gap-6">
@@ -179,7 +179,7 @@
                     <div id="view-interpreted">
                         <div id="detail-data" class="p-5 bg-slate-950 rounded-xl text-[12px] mono break-all text-slate-300 border border-slate-800 leading-relaxed shadow-inner overflow-x-auto whitespace-pre-wrap">--</div>
                     </div>
-                    
+
                     <div id="view-hex" class="hidden">
                         <div id="detail-hex" class="p-5 bg-black rounded-xl text-[10px] mono break-all text-orange-500/70 border border-slate-800 leading-tight">--</div>
                     </div>
@@ -187,7 +187,70 @@
             </div>
             <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex justify-between items-center">
                 <div class="text-[10px] text-slate-500 font-mono">Payload: <span id="detail-offset">0</span> bytes</div>
-                <button onclick="app.closeDetail()" class="px-8 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-orange-900/20 transition-all">Close</button>
+                <div class="flex gap-2">
+                    <button onclick="app.exportProof()" class="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-bold border border-slate-700 transition-all">Export Proof</button>
+                    <button onclick="app.closeDetail()" class="px-8 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-orange-900/20 transition-all">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Proof Overlay -->
+    <div id="proof-overlay" class="hidden fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/50">
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-bold">Verification Proof</h3>
+                    <div id="proof-loading" class="text-[10px] font-bold bg-orange-600/20 text-orange-400 px-2 py-0.5 rounded border border-orange-500/20 animate-pulse">GENERATING...</div>
+                </div>
+                <button onclick="app.closeProof()" class="p-2 hover:bg-slate-800 rounded-lg text-slate-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                <div id="proof-content" class="hidden space-y-6">
+                    <div>
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">tlog-proof bundle</span>
+                        <div class="relative">
+                            <pre id="proof-raw" class="p-5 bg-slate-950 rounded-xl text-[12px] mono break-all text-slate-300 border border-slate-800 leading-relaxed shadow-inner overflow-x-auto whitespace-pre max-h-60 overflow-y-auto custom-scrollbar">--</pre>
+                            <div class="absolute top-3 right-3 flex gap-2">
+                                <button onclick="app.copyProof()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold border border-slate-700 transition-all">Copy</button>
+                                <button onclick="app.downloadProof()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold border border-slate-700 transition-all">Download</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">Raw Leaf Data</span>
+                        <div class="flex gap-2">
+                            <button onclick="app.downloadLeaf()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold border border-slate-700 transition-all">Download Leaf File</button>
+                        </div>
+                    </div>
+                    <div>
+                        <span class="text-[10px] text-slate-500 uppercase font-bold block mb-1 tracking-widest">How to verify</span>
+                        <div class="space-y-4">
+                            <div>
+                                <p class="text-xs text-slate-400 mb-1">Option 1: Verify using the downloaded leaf file (recommended, verifies content):</p>
+                                <div class="relative">
+                                    <pre id="proof-command-file" class="p-4 bg-slate-950 rounded-xl text-[11px] mono break-all text-orange-400/90 border border-slate-800 leading-relaxed overflow-x-auto">--</pre>
+                                    <button onclick="app.copyCommandFile()" class="absolute top-3 right-3 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold border border-slate-700 transition-all">Copy</button>
+                                </div>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-400 mb-1">Option 2: Verify using the leaf hash (only verifies inclusion of the hash):</p>
+                                <div class="relative">
+                                    <pre id="proof-command-hash" class="p-4 bg-slate-950 rounded-xl text-[11px] mono break-all text-orange-400/90 border border-slate-800 leading-relaxed overflow-x-auto">--</pre>
+                                    <button onclick="app.copyCommandHash()" class="absolute top-3 right-3 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold border border-slate-700 transition-all">Copy</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="proof-status-message" class="text-sm text-slate-400 text-center py-8">
+                    Generating proof...
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-800 bg-slate-900/50 flex justify-end">
+                <button onclick="app.closeProof()" class="px-8 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-sm font-bold shadow-lg shadow-orange-900/20 transition-all">Close</button>
             </div>
         </div>
     </div>
@@ -198,6 +261,13 @@
          * Edit this object to tune Woodpecker Web for your specific log's leaf data.
          ******************************************************************************/
         const LOG_CUSTOMIZER = {
+            /**
+             * logKey
+             * The public verifier key for the log (format: name+hash+key).
+             * If provided, it will be pre-populated in the export verification command.
+             */
+            logKey: "",
+
             /**
              * renderLogEntry
              * @param {Uint8Array} bytes - The raw binary payload for a single log entry.
@@ -312,7 +382,7 @@
             async fetchTile(idx, targetIndex = null) {
                 const encodedPath = this.formatTileIndex(idx);
                 let url = `${this.config.tilePath}${encodedPath}`;
-                
+
                 const isFullTile = (idx + 1) * this.config.tileSize <= this.state.treeSize;
                 if (!isFullTile) {
                     const leavesCount = this.state.treeSize % this.config.tileSize;
@@ -326,7 +396,7 @@
                     const res = await fetch(url);
                     if (!res.ok) throw new Error(`Tile ${idx} not found at ${url}`);
                     const buffer = await res.arrayBuffer();
-                    
+
                     this.log(`Received buffer: ${buffer.byteLength} bytes`);
                     if (buffer.byteLength === 0) {
                         this.log(`Warning: Received empty buffer for tile ${idx}`, true);
@@ -334,7 +404,7 @@
 
                     const entries = this.parseLVP(new Uint8Array(buffer));
                     this.log(`Parsed ${entries.length} entries from uint16 stream`);
-                    
+
                     this.renderEntries(entries, idx, targetIndex);
                 } catch (e) {
                     this.log(`Tile loading error: ${e.message}`, true);
@@ -350,7 +420,7 @@
                     try {
                         const length = dataView.getUint16(pointer, false); 
                         const start = pointer + 2;
-                        
+
                         if (start + length > uint8Array.length) {
                             this.log(`LVP Truncation: Expected ${length} bytes, but only ${uint8Array.length - start} remain.`, true);
                             break;
@@ -363,20 +433,20 @@
                         break;
                     }
                 }
-                
+
                 if (pointer < uint8Array.length && uint8Array.length - pointer > 0) {
                     this.log(`Trailing data: ${uint8Array.length - pointer} bytes remain unparsed.`);
                 }
-                
+
                 return records;
             },
 
             renderEntries(records, tileIdx, targetIndex = null) {
                 const container = document.getElementById('entries-container');
                 container.innerHTML = '';
-                
+
                 document.getElementById('entries-subtitle').textContent = `Binary Stream Viewer | Tile #${tileIdx}`;
-                
+
                 if (records.length === 0) {
                     container.innerHTML = `
                         <div class="flex flex-col items-center justify-center h-48 text-slate-500 border border-dashed border-slate-800 rounded-xl">
@@ -396,11 +466,11 @@
                     const div = document.createElement('div');
                     div.id = `entry-${globalIdx}`;
                     div.className = "group flex items-center justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-orange-500/50 cursor-pointer transition-all shadow-sm";
-                    
+
                     const interpreted = LOG_CUSTOMIZER.renderLogEntry(record);
-                    
+
                     div.onclick = () => this.showDetail(globalIdx, record);
-                    
+
                     if (globalIdx === targetIndex) {
                         div.classList.add('jump-highlight');
                         targetElement = div;
@@ -434,6 +504,7 @@
 
             showDetail(idx, buffer) {
                 this.state.currentEntryBytes = buffer;
+                this.state.currentIndex = idx;
                 this.setInspectorTab('interpreted');
                 document.getElementById('detail-index').textContent = `#${idx}`;
                 document.getElementById('detail-data').textContent = LOG_CUSTOMIZER.renderLogEntry(buffer);
@@ -442,7 +513,7 @@
                 document.getElementById('detail-offset').textContent = buffer.byteLength;
                 document.getElementById('detail-overlay').classList.remove('hidden');
             },
-            
+
             showSignatureDetail(identity, sig) {
                 document.getElementById('sig-identity').textContent = identity;
                 document.getElementById('sig-data').textContent = sig;
@@ -493,6 +564,161 @@
                 `;
             },
 
+            async exportProof() {
+                const idx = this.state.currentIndex;
+
+                document.getElementById('proof-overlay').classList.remove('hidden');
+                document.getElementById('proof-loading').classList.remove('hidden');
+                document.getElementById('proof-content').classList.add('hidden');
+                document.getElementById('proof-status-message').classList.remove('hidden');
+                document.getElementById('proof-status-message').textContent = "Initializing proof generation...";
+
+                try {
+                    const cpResponse = await fetch(this.config.checkpointPath);
+                    if (!cpResponse.ok) throw new Error("Failed to fetch checkpoint");
+                    const cpText = await cpResponse.text();
+
+                    const cpLines = cpText.trim().split('\n');
+                    if (cpLines.length < 2) {
+                        throw new Error("Malformed checkpoint fetched for proof");
+                    }
+                    const treeSize = parseInt(cpLines[1], 10);
+
+                    const h = Math.round(Math.log2(this.config.tileSize));
+
+                    let logRoot = "";
+                    const slashIdx = this.config.checkpointPath.lastIndexOf('/');
+                    if (slashIdx !== -1) {
+                        logRoot = this.config.checkpointPath.substring(0, slashIdx + 1);
+                    }
+
+                    const tileCache = {};
+                    const fetchTileBytes = async (path) => {
+                        if (tileCache[path]) {
+                            return tileCache[path];
+                        }
+                        this.log(`Proof Gen: Fetching tile ${path}`);
+                        document.getElementById('proof-status-message').textContent = `Fetching tile ${path}...`;
+                        const res = await fetch(logRoot + path);
+                        if (!res.ok) throw new Error(`Failed to fetch tile ${path}`);
+                        const buf = await res.arrayBuffer();
+                        const bytes = new Uint8Array(buf);
+                        tileCache[path] = bytes;
+                        return bytes;
+                    };
+
+                    document.getElementById('proof-status-message').textContent = "Calculating proof path...";
+
+                    const proofHashes = await ProofGenerator.generateProof(treeSize, idx, fetchTileBytes, h);
+
+                    const leafHashBytes = await computeLeafHash(this.state.currentEntryBytes);
+                    const leafHashB64 = base64Encode(leafHashBytes);
+
+                    let proofBundle = "c2sp.org/tlog-proof@v1\n";
+                    proofBundle += `index ${idx}\n`;
+                    for (const hash of proofHashes) {
+                        proofBundle += base64Encode(hash) + "\n";
+                    }
+                    proofBundle += "\n";
+                    proofBundle += cpText;
+                    if (!cpText.endsWith('\n')) {
+                        proofBundle += "\n";
+                    }
+
+                    this.state.currentProofBundle = proofBundle;
+                    this.state.currentLeafHashB64 = leafHashB64;
+
+                    document.getElementById('proof-raw').textContent = proofBundle;
+
+                    let logKeyVal = LOG_CUSTOMIZER.logKey || "<LOG_PUBLIC_KEY>";
+                    if (!LOG_CUSTOMIZER.logKey) {
+                        try {
+                            const keyRes = await fetch(logRoot + 'key');
+                            if (keyRes.ok) {
+                                const keyText = await keyRes.text();
+                                logKeyVal = keyText.trim();
+                            }
+                        } catch (e) {
+                            // ignore
+                        }
+                    }
+
+                    const originName = cpText.split('\n')[0];
+                    const safeOrigin = originName.replace(/[^a-zA-Z0-9.-]/g, '-').replace(/-+/g, '-');
+                    const filename = `${safeOrigin}-${idx}.tlog-proof`;
+                    this.state.currentProofFilename = filename;
+
+                    const leafFilename = `${safeOrigin}-${idx}.raw`;
+                    this.state.currentLeafFilename = leafFilename;
+
+                    const commandFile = `go run github.com/transparency-dev/incubator/cmd/tlog-verify@latest \\\n  --log-key "${logKeyVal}" \\\n  --origin "${originName}" \\\n  --leaf-file "${leafFilename}" \\\n  ${filename}`;
+
+                    const commandHash = `go run github.com/transparency-dev/incubator/cmd/tlog-verify@latest \\\n  --log-key "${logKeyVal}" \\\n  --origin "${originName}" \\\n  --leaf-hash "${leafHashB64}" \\\n  ${filename}`;
+
+                    this.state.currentVerifyCommandFile = commandFile;
+                    this.state.currentVerifyCommandHash = commandHash;
+
+                    document.getElementById('proof-command-file').textContent = commandFile;
+                    document.getElementById('proof-command-hash').textContent = commandHash;
+
+                    document.getElementById('proof-loading').classList.add('hidden');
+                    document.getElementById('proof-status-message').classList.add('hidden');
+                    document.getElementById('proof-content').classList.remove('hidden');
+
+                } catch (e) {
+                    this.log(`Proof Gen Failed: ${e.message}`, true);
+                    document.getElementById('proof-loading').classList.add('hidden');
+                    document.getElementById('proof-status-message').textContent = `Failed: ${e.message}`;
+                    document.getElementById('proof-status-message').classList.remove('text-slate-400');
+                    document.getElementById('proof-status-message').classList.add('text-red-400', 'font-bold');
+                }
+            },
+
+            closeProof() {
+                document.getElementById('proof-overlay').classList.add('hidden');
+            },
+
+            copyProof() {
+                navigator.clipboard.writeText(this.state.currentProofBundle);
+                this.log("Proof copied to clipboard");
+            },
+
+            downloadProof() {
+                const blob = new Blob([this.state.currentProofBundle], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = this.state.currentProofFilename || `proof-${this.state.currentIndex}.tlog-proof`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.log("Proof downloaded");
+            },
+
+            downloadLeaf() {
+                const blob = new Blob([this.state.currentEntryBytes], { type: 'application/octet-stream' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = this.state.currentLeafFilename || `leaf-${this.state.currentIndex}.raw`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                this.log("Leaf downloaded");
+            },
+
+            copyCommandFile() {
+                navigator.clipboard.writeText(this.state.currentVerifyCommandFile);
+                this.log("File verification command copied to clipboard");
+            },
+
+            copyCommandHash() {
+                navigator.clipboard.writeText(this.state.currentVerifyCommandHash);
+                this.log("Hash verification command copied to clipboard");
+            },
+
             setupListeners() {
                 document.getElementById('search-input').addEventListener('keypress', (e) => {
                     if (e.key === 'Enter') {
@@ -505,6 +731,279 @@
                 });
             }
         };
+
+        /*******************************************************************************
+         * 🧮 Merkle Proof Generation Helpers (ported from golang.org/x/mod/sumdb/tlog)
+         ******************************************************************************/
+        function maxpow2(n) {
+            let l = 0;
+            let k = 1n;
+            while (k * 2n < n) {
+                k *= 2n;
+                l++;
+            }
+            return { k, l };
+        }
+
+        function storedHashIndex(level, n) {
+            level = BigInt(level);
+            n = BigInt(n);
+            for (let l = level; l > 0n; l--) {
+                n = 2n * n + 1n;
+            }
+            let i = 0n;
+            while (n > 0n) {
+                i += n;
+                n >>= 1n;
+            }
+            return i + level;
+        }
+
+        function splitStoredHashIndex(index) {
+            index = BigInt(index);
+            let n = index / 2n;
+            let indexN = storedHashIndex(0, n);
+            if (indexN > index) {
+                throw new Error("bad math");
+            }
+            while (true) {
+                let tz = BigInt(trailingZeros64(n + 1n));
+                let x = indexN + 1n + tz;
+                if (x > index) {
+                    break;
+                }
+                n++;
+                indexN = x;
+            }
+            let level = Number(index - indexN);
+            return { level, n: n >> BigInt(level) };
+        }
+
+        function trailingZeros64(n) {
+            if (n === 0n) return 64;
+            let count = 0;
+            while ((n & 1n) === 0n) {
+                count++;
+                n >>= 1n;
+            }
+            return count;
+        }
+
+        function tileForIndex(h, index) {
+            h = BigInt(h);
+            index = BigInt(index);
+            let { level, n } = splitStoredHashIndex(index);
+            level = BigInt(level);
+            let L = level / h;
+            let levelWithinTile = level - L * h;
+            let N = (n << levelWithinTile) >> h;
+            let nWithinTile = n - ((N << h) >> levelWithinTile);
+            let W = (nWithinTile + 1n) << levelWithinTile;
+
+            const HashSize = 32n;
+            let start = (nWithinTile << levelWithinTile) * HashSize;
+            let end = ((nWithinTile + 1n) << levelWithinTile) * HashSize;
+
+            return {
+                tile: { H: Number(h), L: Number(L), N: N, W: Number(W) },
+                start: Number(start),
+                end: Number(end)
+            };
+        }
+
+        function tilePath(tile) {
+            let n = BigInt(tile.N);
+            const pathBase = 1000n;
+            let nStr = (n % pathBase).toString().padStart(3, '0');
+            while (n >= pathBase) {
+                n /= pathBase;
+                nStr = (n % pathBase).toString().padStart(3, '0') + '/' + nStr;
+            }
+            const parts = nStr.split('/');
+            for (let i = 0; i < parts.length - 1; i++) {
+                parts[i] = 'x' + parts[i];
+            }
+            nStr = parts.join('/');
+
+            let pStr = "";
+            let wFull = 2n ** BigInt(tile.H);
+            if (BigInt(tile.W) !== wFull) {
+                pStr = `.p/${tile.W}`;
+            }
+            let L = tile.L === -1 ? "data" : tile.L.toString();
+            return `tile/${tile.H}/${L}/${nStr}${pStr}`;
+        }
+
+        function tileParent(t, k, n) {
+            let tile = { ...t };
+            tile.L += k;
+            tile.N = BigInt(tile.N) >> BigInt(k * tile.H);
+            tile.W = 1 << tile.H;
+
+            let max = BigInt(n) >> BigInt(tile.L * tile.H);
+            let wBig = BigInt(tile.W);
+            let nShift = BigInt(tile.N) << BigInt(tile.H);
+            if (nShift + wBig >= max) {
+                if (nShift >= max) {
+                    return null;
+                }
+                tile.W = Number(max - nShift);
+            }
+            return tile;
+        }
+
+        async function nodeHash(left, right) {
+            const buf = new Uint8Array(1 + 32 + 32);
+            buf[0] = 0x01;
+            buf.set(left, 1);
+            buf.set(right, 1 + 32);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
+            return new Uint8Array(hashBuffer);
+        }
+
+        async function subTreeHash(lo, hi, hashes) {
+            lo = BigInt(lo);
+            hi = BigInt(hi);
+            let numTree = 0;
+            let tempLo = lo;
+            while (tempLo < hi) {
+                let { k } = maxpow2(hi - tempLo + 1n);
+                tempLo += k;
+                numTree++;
+            }
+
+            if (hashes.length < numTree) {
+                throw new Error("bad index math in subTreeHash");
+            }
+
+            let subHashes = hashes.slice(0, numTree);
+            let remainingHashes = hashes.slice(numTree);
+
+            let h = subHashes[numTree - 1];
+            for (let i = numTree - 2; i >= 0; i--) {
+                h = await nodeHash(subHashes[i], h);
+            }
+            return { hash: h, remaining: remainingHashes };
+        }
+
+        async function leafProof(lo, hi, n, hashes) {
+            lo = BigInt(lo);
+            hi = BigInt(hi);
+            n = BigInt(n);
+
+            if (lo + 1n === hi) {
+                return { proof: [], remaining: hashes };
+            }
+
+            let { k } = maxpow2(hi - lo);
+            let p, th, res;
+            if (n < lo + k) {
+                res = await leafProof(lo, lo + k, n, hashes);
+                p = res.proof;
+                res = await subTreeHash(lo + k, hi, res.remaining);
+                th = res.hash;
+                hashes = res.remaining;
+            } else {
+                res = await subTreeHash(lo, lo + k, hashes);
+                th = res.hash;
+                res = await leafProof(lo + k, hi, n, res.remaining);
+                p = res.proof;
+                hashes = res.remaining;
+            }
+            p.push(th);
+            return { proof: p, remaining: hashes };
+        }
+
+        async function computeLeafHash(dataBytes) {
+            const prefixed = new Uint8Array(1 + dataBytes.length);
+            prefixed[0] = 0x00;
+            prefixed.set(dataBytes, 1);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', prefixed);
+            return new Uint8Array(hashBuffer);
+        }
+
+        function base64Encode(bytes) {
+            let binary = '';
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            return window.btoa(binary);
+        }
+
+        async function tileHash(data) {
+            if (data.length === 0) {
+                throw new Error("bad math in tileHash");
+            }
+            const HashSize = 32;
+            if (data.length === HashSize) {
+                return data;
+            }
+            const n = data.length / 2;
+            const left = await tileHash(data.slice(0, n));
+            const right = await tileHash(data.slice(n));
+            return await nodeHash(left, right);
+        }
+
+        const ProofGenerator = {
+            async generateProof(treeSize, index, fetchTileBytes, h) {
+                const indexes = leafProofIndex(0, treeSize, index);
+                const hashes = [];
+                for (const idx of indexes) {
+                    const { tile, start, end } = tileForIndex(h, idx);
+                    const actualTile = tileParent(tile, 0, treeSize);
+                    if (!actualTile) {
+                        throw new Error(`Index ${idx} not in tree of size ${treeSize}`);
+                    }
+                    const path = tilePath(actualTile);
+                    const tileData = await fetchTileBytes(path);
+                    if (tileData.length < end) {
+                        throw new Error(`Tile data too short for index ${idx}`);
+                    }
+                    const rawHashData = tileData.slice(start, end);
+                    const singleHash = await tileHash(rawHashData);
+                    hashes.push(singleHash);
+                }
+                const { proof } = await leafProof(0, treeSize, index, hashes);
+                return proof;
+            }
+        };
+
+        function leafProofIndex(lo, hi, n, need = []) {
+            lo = BigInt(lo);
+            hi = BigInt(hi);
+            n = BigInt(n);
+            if (!(lo <= n && n < hi)) {
+                throw new Error("bad math in leafProofIndex");
+            }
+            if (lo + 1n === hi) {
+                return need;
+            }
+            let { k } = maxpow2(hi - lo);
+            if (n < lo + k) {
+                need = leafProofIndex(lo, lo + k, n, need);
+                need = subTreeIndex(lo + k, hi, need);
+            } else {
+                need = subTreeIndex(lo, lo + k, need);
+                need = leafProofIndex(lo + k, hi, n, need);
+            }
+            return need;
+        }
+
+        function subTreeIndex(lo, hi, need = []) {
+            lo = BigInt(lo);
+            hi = BigInt(hi);
+            while (lo < hi) {
+                let { k, l } = maxpow2(hi - lo + 1n);
+                if ((lo & (k - 1n)) !== 0n) {
+                    throw new Error("bad math in subTreeIndex");
+                }
+                let level = l;
+                need.push(storedHashIndex(level, lo >> BigInt(level)));
+                lo += k;
+            }
+            return need;
+        }
 
         window.onload = () => app.init();
     </script>
