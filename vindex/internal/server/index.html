@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VIndex Web | Raw Wire Inspector</title>
+    <style>
+        :root {
+            --bg: #0b1120; --panel: #111827; --panel-alt: #0f172a; --border: #1e293b;
+            --text: #e2e8f0; --muted: #94a3b8; --accent: #2563eb; --accent-hover: #3b82f6;
+            --warn-bg: #451a03; --warn-border: #92400e; --warn-text: #fcd34d;
+            --err-bg: #4c0519; --err-border: #9f1239; --err-text: #fda4af;
+            --ok-bg: #064e3b; --ok-border: #065f46; --ok-text: #6ee7b7;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg); color: var(--text);
+        }
+        .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+        header {
+            height: 56px; border-bottom: 1px solid var(--border); background: var(--panel);
+            display: flex; align-items: center; justify-content: space-between; padding: 0 20px; flex-shrink: 0;
+        }
+        .brand { display: flex; align-items: baseline; gap: 10px; }
+        .brand h1 { margin: 0; font-size: 15px; font-weight: 800; letter-spacing: 0.03em; }
+        .brand span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+        .notice-banner {
+            background: var(--warn-bg); border-bottom: 1px solid var(--warn-border);
+            color: var(--warn-text); font-size: 12px; padding: 8px 20px; flex-shrink: 0;
+        }
+        .status-pill {
+            display: inline-flex; align-items: center; gap: 6px; font-size: 11px; padding: 4px 10px;
+            border-radius: 999px; background: var(--panel-alt); border: 1px solid var(--border);
+            color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
+        }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #64748b; }
+        .dot.loading { background: #fbbf24; }
+        .dot.error { background: #f43f5e; }
+        .dot.loaded { background: #34d399; }
+        main { flex: 1; display: flex; overflow: hidden; }
+        aside {
+            width: 300px; border-right: 1px solid var(--border); background: var(--panel);
+            padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; flex-shrink: 0;
+        }
+        .section-label {
+            font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 0.08em; margin-bottom: 8px; display: block;
+        }
+        .field { margin-bottom: 10px; }
+        .field label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+        input[type="text"] {
+            width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+            color: var(--text); padding: 7px 10px; font-size: 12px; outline: none;
+        }
+        input[type="text"]:focus { border-color: var(--accent); }
+        .check-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+        .meta-box {
+            background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+            padding: 12px; display: flex; flex-direction: column; gap: 10px;
+        }
+        .meta-item small { display: block; font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 2px; }
+        .meta-item div { font-size: 12px; word-break: break-all; }
+        .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+        .badge-ok { background: var(--ok-bg); border: 1px solid var(--ok-border); color: var(--ok-text); }
+        .badge-empty { background: var(--err-bg); border: 1px solid var(--err-border); color: var(--err-text); }
+        section.content { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .search-bar { padding: 16px 20px; border-bottom: 1px solid var(--border); background: var(--panel-alt); display: flex; gap: 10px; }
+        .search-bar input[type="text"] { font-size: 13px; padding: 10px 12px; }
+        button, a.btn-link {
+            background: var(--accent); color: #fff; border: 1px solid transparent; border-radius: 6px;
+            padding: 8px 14px; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none;
+            display: inline-flex; align-items: center; gap: 6px;
+        }
+        button:hover, a.btn-link:hover { background: var(--accent-hover); }
+        button.secondary, a.btn-link.secondary { background: var(--panel); color: var(--text); border-color: var(--border); }
+        button.secondary:hover, a.btn-link.secondary:hover { border-color: var(--muted); background: var(--panel-alt); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .results-scroll { flex: 1; overflow-y: auto; padding: 20px; }
+        .results-inner { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+        .empty-card {
+            border: 1px solid var(--border); background: var(--panel); border-radius: 10px;
+            padding: 32px 20px; text-align: center; color: var(--muted); font-size: 13px;
+        }
+        .empty-card.error { border-color: var(--err-border); color: var(--err-text); }
+        .key-chips { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .results-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+        .entry-card {
+            display: flex; align-items: center; justify-content: space-between; gap: 12px;
+            padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+        }
+        .entry-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+        .entry-idx {
+            font-size: 11px; font-weight: 700; padding: 3px 7px; border-radius: 4px;
+            background: var(--bg); border: 1px solid var(--border); color: #60a5fa; flex-shrink: 0;
+        }
+        .entry-preview { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .entry-preview.clickable { color: var(--text); cursor: pointer; }
+        .entry-preview.clickable:hover { color: #60a5fa; }
+        .entry-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+        .pag-row { display: flex; justify-content: center; gap: 8px; padding-top: 8px; }
+        .hidden { display: none !important; }
+        .modal-backdrop {
+            position: fixed; inset: 0; background: rgba(2, 6, 23, 0.85);
+            display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+        }
+        .modal {
+            background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+            width: 100%; max-width: 760px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .modal-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .modal-body { padding: 18px; overflow-y: auto; }
+        pre {
+            margin: 0; padding: 14px; background: var(--bg); border: 1px solid var(--border);
+            border-radius: 6px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="brand">
+            <h1>VIndex Web</h1>
+            <span>Unverified Wire Inspector</span>
+        </div>
+        <div class="status-pill">
+            <span id="status-indicator" class="dot"></span>
+            <span id="status-text">Ready</span>
+        </div>
+    </header>
+    <div class="notice-banner">
+        Raw HTTP inspector: displays unverified <code>/keys</code>, <code>/values</code>, and entry-bundle responses from the server. Use <code>vindex-client</code> for cryptographic signature, MPT, and Merkle proof verification.
+    </div>
+
+    <main>
+        <aside>
+            <div>
+                <span class="section-label">Configuration</span>
+                <div class="field">
+                    <label for="config-vindex-url">VIndex API Base Path</label>
+                    <input id="config-vindex-url" type="text" value="/" class="mono">
+                </div>
+                <div class="field">
+                    <label for="config-inlog-url">Input Log Base URL</label>
+                    <input id="config-inlog-url" type="text" value="/inputlog" class="mono">
+                </div>
+                <div class="check-row">
+                    <input id="config-prefix-mode" type="checkbox">
+                    <label for="config-prefix-mode">Prefix Search (?prefix=&lt;key&gt;)</label>
+                </div>
+                <div class="check-row">
+                    <input id="config-use-woodpecker" type="checkbox" checked>
+                    <label for="config-use-woodpecker">Link to Woodpecker</label>
+                </div>
+            </div>
+
+            <div id="metadata-section" class="hidden">
+                <span class="section-label">Reported Response Metadata (Unverified)</span>
+                <div class="meta-box">
+                    <div class="meta-item">
+                        <small>Key Hash (SHA-256)</small>
+                        <div id="meta-key-hash" class="mono">--</div>
+                    </div>
+                    <div class="meta-item">
+                        <small>Reported MPT Root</small>
+                        <div id="meta-mpt-root" class="mono">--</div>
+                    </div>
+                    <div class="meta-grid">
+                        <div class="meta-item">
+                            <small>Input Log Size</small>
+                            <div id="meta-inlog-size" class="mono">--</div>
+                        </div>
+                        <div class="meta-item">
+                            <small>Output Log Size</small>
+                            <div id="meta-outlog-size" class="mono">--</div>
+                        </div>
+                    </div>
+                    <div class="meta-item">
+                        <small>Response Mode</small>
+                        <div><span id="meta-proof-type" class="badge">--</span></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <section class="content">
+            <div class="search-bar">
+                <input id="search-input" type="text" value="github.com/transparency-dev/tessera"
+                       placeholder="Enter canonical search key (e.g. github.com/transparency-dev/tessera)..."
+                       class="mono">
+                <button id="btn-lookup" type="button">Lookup</button>
+            </div>
+
+            <div class="results-scroll">
+                <div id="results-container" class="results-inner">
+                    <div class="empty-card">Enter a canonical key or prefix above to inspect raw index responses.</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="detail-overlay" class="modal-backdrop hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <strong>Input Log Leaf Inspector</strong>
+                    <span id="detail-index" class="entry-idx mono">#--</span>
+                </div>
+                <button id="btn-close-detail" type="button" class="secondary">Close</button>
+            </div>
+            <div class="modal-body">
+                <pre id="detail-content" class="mono">--</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DEFAULT_PROMPT = 'Enter a canonical key or prefix above to inspect raw index responses.';
+        const RENDER_STEP = 500;
+        const MAX_CACHED_TILES = 32;
+
+        function el(tag, cls, text) {
+            const node = document.createElement(tag);
+            if (cls) node.className = cls;
+            if (text !== undefined) node.textContent = text;
+            return node;
+        }
+
+        function parseUintBigInt(raw) {
+            const s = raw.trim();
+            return /^\d+$/.test(s) ? BigInt(s) : null;
+        }
+
+        function parseLVP(data) {
+            const entries = [];
+            let offset = 0;
+            while (offset + 2 <= data.length) {
+                const len = (data[offset] << 8) | data[offset + 1];
+                offset += 2;
+                if (offset + len > data.length) break;
+                entries.push(data.subarray(offset, offset + len));
+                offset += len;
+            }
+            return entries;
+        }
+
+        function formatTileIndex(n) {
+            const s = String(n), parts = [];
+            for (let i = s.length; i > 0; i -= 3) {
+                parts.unshift((parts.length ? 'x' : '') + s.slice(Math.max(0, i - 3), i).padStart(3, '0'));
+            }
+            return parts.join('/');
+        }
+
+        async function sha256Hex(message) {
+            if (!globalThis.crypto?.subtle) return 'unavailable (HTTPS required)';
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+            return Array.from(new Uint8Array(buf), b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function encodeRFC3986(s) {
+            return encodeURIComponent(s).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+        }
+
+        function sanitizeBaseUrl(raw) {
+            const trimmed = raw.trim().replace(/\/+$/, '');
+            if (!trimmed) return '';
+            if (trimmed.startsWith('/')) {
+                if (trimmed.startsWith('//') || trimmed.startsWith('/\\')) return '';
+                return trimmed;
+            }
+            try {
+                const u = new URL(trimmed, window.location.origin);
+                if (u.protocol === 'http:' || u.protocol === 'https:') {
+                    return u.toString().replace(/\/+$/, '');
+                }
+            } catch (_) {}
+            return '';
+        }
+
+        const app = {
+            tileSize: 256n,
+            reqSeq: 0,
+            state: {
+                currentKey: '',
+                keyHash: '',
+                inputLogTreeSize: 0n,
+                outputLogTreeSize: 0n,
+                mptRoot: '',
+                discoveredKeys: [],
+                indices: [],
+                renderLimit: RENDER_STEP,
+                nextBefore: null,
+                tileCache: new Map()
+            },
+
+            setStatus(status, kind) {
+                document.getElementById('status-text').textContent = status;
+                document.getElementById('status-indicator').className = 'dot' + (kind ? ' ' + kind : '');
+            },
+
+            resetView() {
+                this.reqSeq++;
+                this.state.currentKey = '';
+                this.state.keyHash = '';
+                this.state.inputLogTreeSize = 0n;
+                this.state.outputLogTreeSize = 0n;
+                this.state.mptRoot = '';
+                this.state.discoveredKeys = [];
+                this.state.indices = [];
+                this.state.renderLimit = RENDER_STEP;
+                this.state.nextBefore = null;
+                document.getElementById('metadata-section').classList.add('hidden');
+                this.setStatus('Ready', '');
+                this.showEmptyMessage(DEFAULT_PROMPT, false);
+            },
+
+            syncURL(push, selectedKey) {
+                const params = new URLSearchParams(window.location.search);
+                params.delete('key');
+                params.delete('prefix');
+                params.delete('select');
+                const rawQuery = document.getElementById('search-input').value.trim();
+                const isPrefix = document.getElementById('config-prefix-mode').checked;
+                if (rawQuery) {
+                    params.set(isPrefix ? 'prefix' : 'key', rawQuery);
+                    if (isPrefix && selectedKey) params.set('select', selectedKey);
+                }
+                const nextURL = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+                if (nextURL === window.location.pathname + window.location.search) return;
+                if (push) {
+                    window.history.pushState(null, '', nextURL);
+                } else {
+                    window.history.replaceState(null, '', nextURL);
+                }
+            },
+
+            showEmptyMessage(message, isError) {
+                document.getElementById('results-container').replaceChildren(
+                    el('div', isError ? 'empty-card error mono' : 'empty-card', message)
+                );
+            },
+
+            async setCurrentKey(key) {
+                this.state.currentKey = key;
+                this.state.keyHash = await sha256Hex(key);
+                document.getElementById('meta-key-hash').textContent = this.state.keyHash;
+            },
+
+            async lookup(skipHistory, preferredKey) {
+                const rawKey = document.getElementById('search-input').value.trim();
+                if (!rawKey) return;
+
+                const seq = ++this.reqSeq;
+                const vindexBasePath = sanitizeBaseUrl(document.getElementById('config-vindex-url').value);
+                const isPrefix = document.getElementById('config-prefix-mode').checked;
+
+                if (!skipHistory) this.syncURL(true, '');
+
+                try {
+                    this.state.indices = [];
+                    this.state.renderLimit = RENDER_STEP;
+                    this.state.nextBefore = null;
+                    this.state.discoveredKeys = [];
+                    this.state.mptRoot = '';
+                    this.state.inputLogTreeSize = 0n;
+                    this.state.outputLogTreeSize = 0n;
+                    this.state.keyHash = '--';
+
+                    this.setStatus('Querying /keys...', 'loading');
+                    this.showEmptyMessage('Fetching /keys response...', false);
+
+                    const keysUrl = isPrefix
+                        ? `${vindexBasePath}/keys?prefix=${encodeRFC3986(rawKey)}`
+                        : `${vindexBasePath}/keys?key=${encodeRFC3986(rawKey)}`;
+                    const keysResp = await fetch(keysUrl);
+                    if (seq !== this.reqSeq) return;
+                    if (!keysResp.ok) {
+                        throw new Error(`HTTP ${keysResp.status}: ${await keysResp.text()}`);
+                    }
+                    const keysBody = await keysResp.text();
+                    if (seq !== this.reqSeq) return;
+                    const hasKeys = this.processKeysResponse(keysBody, isPrefix);
+                    if (!hasKeys) {
+                        if (!isPrefix) {
+                            await this.setCurrentKey(rawKey);
+                            if (seq !== this.reqSeq) return;
+                        }
+                        this.setStatus('Loaded (unverified)', 'loaded');
+                        return;
+                    }
+
+                    let chosen = this.state.discoveredKeys[0].key;
+                    if (preferredKey && this.state.discoveredKeys.some(d => d.key === preferredKey)) {
+                        chosen = preferredKey;
+                    }
+                    await this.setCurrentKey(chosen);
+                    if (seq !== this.reqSeq) return;
+                    await this.fetchValuesPage(false, seq);
+                } catch (e) {
+                    if (seq !== this.reqSeq) return;
+                    console.error(e);
+                    this.setStatus('Error', 'error');
+                    this.showEmptyMessage(`Query failed: ${e.message}`, true);
+                }
+            },
+
+            async fetchValuesPage(append, seq = ++this.reqSeq) {
+                const vindexBasePath = sanitizeBaseUrl(document.getElementById('config-vindex-url').value);
+                const before = append ? (this.state.nextBefore ?? this.state.inputLogTreeSize) : this.state.inputLogTreeSize;
+                if (!before || before <= 0n) {
+                    this.renderResults();
+                    this.setStatus('Loaded (unverified)', 'loaded');
+                    return;
+                }
+
+                try {
+                    this.setStatus('Querying /values...', 'loading');
+                    const entriesUrl = `${vindexBasePath}/values?key=${encodeRFC3986(this.state.currentKey)}&before=${encodeRFC3986(String(before))}`;
+                    const entriesResp = await fetch(entriesUrl);
+                    if (seq !== this.reqSeq) return;
+                    if (entriesResp.status === 404) {
+                        this.processEntriesResponse('', append);
+                        this.setStatus('Loaded (unverified)', 'loaded');
+                        return;
+                    }
+                    if (!entriesResp.ok) {
+                        throw new Error(`HTTP ${entriesResp.status}: ${await entriesResp.text()}`);
+                    }
+                    const entriesBody = await entriesResp.text();
+                    if (seq !== this.reqSeq) return;
+                    this.processEntriesResponse(entriesBody, append);
+                    this.setStatus('Loaded (unverified)', 'loaded');
+                } catch (e) {
+                    if (seq !== this.reqSeq) return;
+                    console.error(e);
+                    this.setStatus('Error', 'error');
+                    this.showEmptyMessage(`Query failed: ${e.message}`, true);
+                }
+            },
+
+            processKeysResponse(keysBody, isPrefix) {
+                const discovered = [];
+                const proofSplit = keysBody.split('\n\nc2sp.org/tlog-proof@v1\n');
+                if (proofSplit.length >= 1) {
+                    const keyLines = proofSplit[0].split('\n');
+                    for (let i = 1; i < keyLines.length; i++) {
+                        const rawKeyLine = keyLines[i].replace(/\r$/, '');
+                        if (!rawKeyLine) continue;
+                        if (i === 1 && (rawKeyLine === 'proof' || rawKeyLine.startsWith('proof '))) continue;
+                        const spaceIdx = rawKeyLine.indexOf(' ');
+                        if (spaceIdx > 0) {
+                            discovered.push({
+                                key: rawKeyLine.slice(0, spaceIdx),
+                                valueRoot: rawKeyLine.slice(spaceIdx + 1).trim()
+                            });
+                        }
+                    }
+                }
+
+                if (proofSplit.length >= 2) {
+                    const bindStanzas = proofSplit[1].split('\n\n');
+                    for (const l of (bindStanzas[0] || '').split('\n')) {
+                        const trimmed = l.trim();
+                        if (trimmed.startsWith('extra ')) {
+                            try {
+                                const rawLeaf = atob(trimmed.slice(6).trim());
+                                for (const ll of rawLeaf.split('\n')) {
+                                    if (ll.startsWith('mpt-root ')) {
+                                        this.state.mptRoot = ll.slice(9).trim();
+                                    } else if (ll.startsWith('input-size ')) {
+                                        this.state.inputLogTreeSize = parseUintBigInt(ll.slice(11)) ?? 0n;
+                                    }
+                                }
+                            } catch (err) {
+                                console.error('Failed to decode extra leaf:', err);
+                            }
+                        }
+                    }
+                    if (bindStanzas.length >= 2) {
+                        const outLines = bindStanzas[1].split('\n');
+                        if (outLines.length >= 2) {
+                            this.state.outputLogTreeSize = parseUintBigInt(outLines[1]) ?? 0n;
+                        }
+                    }
+                }
+
+                this.state.discoveredKeys = discovered;
+                document.getElementById('metadata-section').classList.remove('hidden');
+                document.getElementById('meta-key-hash').textContent = this.state.keyHash;
+                document.getElementById('meta-mpt-root').textContent = this.state.mptRoot || '--';
+                document.getElementById('meta-inlog-size').textContent = this.state.inputLogTreeSize.toLocaleString();
+                document.getElementById('meta-outlog-size').textContent = this.state.outputLogTreeSize.toLocaleString();
+
+                const proofTypeEl = document.getElementById('meta-proof-type');
+                if (discovered.length === 0) {
+                    proofTypeEl.textContent = isPrefix ? 'Prefix Empty (Unverified)' : 'Non-Inclusion Response (Unverified)';
+                    proofTypeEl.className = 'badge badge-empty';
+                    this.showEmptyMessage('Server reported zero matching keys for this query (unverified response).', false);
+                    return false;
+                }
+
+                proofTypeEl.textContent = isPrefix
+                    ? `Prefix Match: ${discovered.length} Keys (Unverified)`
+                    : 'Key Match Response (Unverified)';
+                proofTypeEl.className = 'badge badge-ok';
+                return true;
+            },
+
+            processEntriesResponse(entriesBody, append) {
+                const pageIndices = [];
+                let nextBefore = null;
+                let coveredSize = 0n;
+
+                if (entriesBody && entriesBody.trim() !== '') {
+                    const stanzas = entriesBody.trim().split('\n\n');
+                    for (const l of (stanzas[0] || '').split('\n')) {
+                        const trimmed = l.trim();
+                        if (trimmed.startsWith('preceding ')) {
+                            coveredSize = parseUintBigInt(trimmed.slice(10)) ?? 0n;
+                        }
+                    }
+                    if (stanzas.length >= 2 && stanzas[1]) {
+                        for (const l of stanzas[1].split('\n')) {
+                            const val = parseUintBigInt(l);
+                            if (val !== null) pageIndices.push(val);
+                        }
+                    }
+                    if (coveredSize > 0n && pageIndices.length > 0) {
+                        nextBefore = pageIndices[0];
+                    }
+                    pageIndices.reverse();
+                }
+
+                this.state.nextBefore = nextBefore;
+                this.state.indices = append ? this.state.indices.concat(pageIndices) : pageIndices;
+                if (!append) this.state.renderLimit = RENDER_STEP;
+                this.renderResults();
+            },
+
+            async selectKey(idx) {
+                const entry = this.state.discoveredKeys[idx];
+                if (!entry) return;
+                const seq = ++this.reqSeq;
+                this.syncURL(false, entry.key);
+                await this.setCurrentKey(entry.key);
+                if (seq !== this.reqSeq) return;
+                this.state.indices = [];
+                this.state.renderLimit = RENDER_STEP;
+                this.state.nextBefore = null;
+                await this.fetchValuesPage(false, seq);
+            },
+
+            renderResults() {
+                const container = document.getElementById('results-container');
+                const fragment = document.createDocumentFragment();
+
+                if (this.state.discoveredKeys.length > 1) {
+                    const keyBar = el('div', 'key-chips');
+                    this.state.discoveredKeys.forEach((dk, i) => {
+                        const btn = el('button', dk.key === this.state.currentKey ? 'mono' : 'secondary mono', dk.key);
+                        btn.type = 'button';
+                        btn.addEventListener('click', () => this.selectKey(i));
+                        keyBar.appendChild(btn);
+                    });
+                    fragment.appendChild(keyBar);
+                }
+
+                if (this.state.indices.length === 0) {
+                    fragment.appendChild(el('div', 'empty-card', 'No entry indices returned in /values response.'));
+                    container.replaceChildren(fragment);
+                    return;
+                }
+
+                const header = el('div', 'results-header');
+                const titleWrap = el('div');
+                const countStrong = el('strong', '', `${this.state.indices.length} Reported ${this.state.indices.length === 1 ? 'Index' : 'Indices'} `);
+                const keyLabel = el('span', 'mono', `(${this.state.currentKey})`);
+                keyLabel.style.color = 'var(--muted)';
+                titleWrap.append(countStrong, keyLabel);
+
+                const fetchAllBtn = el('button', '', 'Fetch Shown Leaves');
+                fetchAllBtn.id = 'btn-fetch-all';
+                fetchAllBtn.type = 'button';
+                fetchAllBtn.addEventListener('click', () => this.fetchAllShown());
+                header.append(titleWrap, fetchAllBtn);
+                fragment.appendChild(header);
+
+                const inLogUrl = sanitizeBaseUrl(document.getElementById('config-inlog-url').value);
+                const useWoodpecker = document.getElementById('config-use-woodpecker').checked;
+                const visible = this.state.indices.slice(0, this.state.renderLimit);
+
+                for (const idx of visible) {
+                    const card = el('div', 'entry-card');
+                    const left = el('div', 'entry-left');
+                    const preview = el('span', 'entry-preview mono', 'Not fetched yet');
+                    preview.id = `preview-${idx}`;
+                    left.append(el('span', 'entry-idx mono', `#${idx}`), preview);
+
+                    const actions = el('div', 'entry-actions');
+                    if (useWoodpecker && inLogUrl) {
+                        const link = el('a', 'btn-link secondary', 'Woodpecker');
+                        link.href = `${inLogUrl}/index.html#entry-${encodeURIComponent(String(idx))}`;
+                        link.target = '_blank';
+                        link.rel = 'noopener noreferrer';
+                        actions.appendChild(link);
+                    }
+                    const fetchBtn = el('button', 'secondary', 'Fetch Leaf');
+                    fetchBtn.type = 'button';
+                    fetchBtn.addEventListener('click', () => this.fetchLeaf(idx));
+                    actions.appendChild(fetchBtn);
+
+                    card.append(left, actions);
+                    fragment.appendChild(card);
+                }
+
+                if (visible.length < this.state.indices.length || this.state.nextBefore !== null) {
+                    const pagDiv = el('div', 'pag-row');
+                    if (visible.length < this.state.indices.length) {
+                        const showMoreBtn = el('button', 'secondary', `Show More (${visible.length} / ${this.state.indices.length})`);
+                        showMoreBtn.type = 'button';
+                        showMoreBtn.addEventListener('click', () => {
+                            this.state.renderLimit += RENDER_STEP;
+                            this.renderResults();
+                        });
+                        pagDiv.appendChild(showMoreBtn);
+                    }
+                    if (this.state.nextBefore !== null) {
+                        const moreBtn = el('button', 'secondary', `Load Earlier Entries (before #${this.state.nextBefore})`);
+                        moreBtn.type = 'button';
+                        moreBtn.addEventListener('click', () => this.fetchValuesPage(true));
+                        pagDiv.appendChild(moreBtn);
+                    }
+                    fragment.appendChild(pagDiv);
+                }
+
+                container.replaceChildren(fragment);
+            },
+
+            async fetchAllShown() {
+                const btn = document.getElementById('btn-fetch-all');
+                if (!btn) return;
+                const seq = this.reqSeq;
+                btn.disabled = true;
+                btn.textContent = 'Fetching...';
+                for (const idx of this.state.indices.slice(0, this.state.renderLimit)) {
+                    if (seq !== this.reqSeq) return;
+                    await this.fetchLeaf(idx);
+                }
+                if (seq === this.reqSeq) btn.textContent = 'Fetched Shown';
+            },
+
+            async fetchLeaf(idx) {
+                const previewEl = document.getElementById(`preview-${idx}`);
+                if (!previewEl) return;
+                previewEl.textContent = 'Fetching tile...';
+
+                try {
+                    const inLogUrl = sanitizeBaseUrl(document.getElementById('config-inlog-url').value);
+                    if (!inLogUrl) throw new Error('Configure a valid Input Log Base URL');
+
+                    const tileIdx = idx / this.tileSize;
+                    let url = `${inLogUrl}/tile/entries/${formatTileIndex(tileIdx)}`;
+                    if ((tileIdx + 1n) * this.tileSize > this.state.inputLogTreeSize) {
+                        const rem = this.state.inputLogTreeSize % this.tileSize;
+                        if (rem > 0n) url = `${url}.p/${rem}`;
+                    }
+
+                    let entries = this.state.tileCache.get(url);
+                    if (!entries) {
+                        const response = await fetch(url);
+                        if (!response.ok) throw new Error(`HTTP ${response.status} fetching tile`);
+                        entries = parseLVP(new Uint8Array(await response.arrayBuffer()));
+                        if (this.state.tileCache.size >= MAX_CACHED_TILES) {
+                            this.state.tileCache.delete(this.state.tileCache.keys().next().value);
+                        }
+                        this.state.tileCache.set(url, entries);
+                    }
+
+                    const localIdx = Number(idx % this.tileSize);
+                    if (localIdx >= entries.length) {
+                        throw new Error(`Index #${idx} not present in tile`);
+                    }
+
+                    const text = new TextDecoder('utf-8').decode(entries[localIdx]);
+                    const singleLine = text.replace(/\n/g, ' \\n ');
+                    previewEl.textContent = singleLine.length > 90 ? singleLine.slice(0, 90) + '...' : singleLine;
+                    previewEl.className = 'entry-preview mono clickable';
+                    previewEl.onclick = () => this.showDetail(idx, text);
+                } catch (e) {
+                    console.error(e);
+                    previewEl.textContent = `Error: ${e.message}`;
+                }
+            },
+
+            showDetail(idx, content) {
+                document.getElementById('detail-index').textContent = `#${idx}`;
+                document.getElementById('detail-content').textContent = content;
+                document.getElementById('detail-overlay').classList.remove('hidden');
+            },
+
+            closeDetail() {
+                document.getElementById('detail-overlay').classList.add('hidden');
+            },
+
+            hydrateFromURL() {
+                this.closeDetail();
+                const params = new URLSearchParams(window.location.search);
+                const keyParam = params.get('key');
+                const prefixParam = params.get('prefix');
+                const selectParam = params.get('select') || '';
+                if (prefixParam) {
+                    document.getElementById('search-input').value = prefixParam;
+                    document.getElementById('config-prefix-mode').checked = true;
+                    this.lookup(true, selectParam);
+                } else if (keyParam) {
+                    document.getElementById('search-input').value = keyParam;
+                    document.getElementById('config-prefix-mode').checked = false;
+                    this.lookup(true, '');
+                } else {
+                    this.resetView();
+                }
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            let basePath = window.location.pathname;
+            if (basePath.endsWith('/index.html')) {
+                basePath = basePath.slice(0, -'/index.html'.length);
+            }
+            if (!basePath.endsWith('/')) basePath += '/';
+            document.getElementById('config-vindex-url').value = basePath.replace(/\/+$/, '') || '/';
+            document.getElementById('config-inlog-url').value = basePath + 'inputlog';
+
+            document.getElementById('btn-lookup').addEventListener('click', () => app.lookup(false, ''));
+            document.getElementById('search-input').addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') app.lookup(false, '');
+            });
+            document.getElementById('btn-close-detail').addEventListener('click', () => app.closeDetail());
+            document.getElementById('detail-overlay').addEventListener('click', (ev) => {
+                if (ev.target.id === 'detail-overlay') app.closeDetail();
+            });
+            window.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Escape') app.closeDetail();
+            });
+
+            app.hydrateFromURL();
+        });
+
+        window.addEventListener('popstate', () => app.hydrateFromURL());
+    </script>
+</body>
+</html>
