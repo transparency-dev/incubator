@@ -26,7 +26,7 @@ Other paths under `<index-url>` (such as `/` and `/index.html` for an optional e
 
 | Endpoint | Method | Purpose |
 | :--- | :--- | :--- |
-| `/healthz` | `GET` | Liveness probe (`200 OK` `ok\n` while the process and optional health callback report healthy). |
+| `/healthz` | `GET` | Liveness probe (`200 OK` `ok\n` while the process is running). |
 | `/readyz` | `GET` | Readiness probe (`200 OK` `ok\n` when `Serving_CP` is active, or `503` with `Retry-After: 30` and JSON diagnostics during MPT open, startup recovery, or Genesis Backfill). |
 | `/metrics` | `GET` | Prometheus telemetry metrics. |
 | `/debug/pprof/*` | `GET` | Go runtime profiling endpoints. |
