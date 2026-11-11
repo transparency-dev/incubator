@@ -2,7 +2,7 @@ module github.com/transparency-dev/incubator
 
 go 1.27.0
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	filippo.io/torchwood v0.10.1-0.20261024135344-1c05157b1fd2
