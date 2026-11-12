@@ -159,7 +159,7 @@ var (
 	// Storage Metrics
 	MPTMMapBytes = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "vindex_mpt_mmap_bytes",
-		Help: "Virtual memory size of the MPT mmap allocation.",
+		Help: "Total on-disk size in bytes of the persisted MPT snapshot, patch, and leaf files.",
 	})
 
 	// Independent Auditor Metrics
@@ -172,13 +172,19 @@ var (
 		Name: "vindex_auditor_root_mismatch",
 		Help: "Current root mismatch status (0 = no mismatch / healthy, 1 = root mismatch detected).",
 	})
+
+	AuditorHalted = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "vindex_auditor_halted",
+		Help: "Current auditor halt status (0 = running / healthy, 1 = permanently halted due to root mismatch, log violation, or deterministic WASM fault).",
+	})
 )
 
 // RecordAuditorRootMismatch records a root hash mismatch event by incrementing
-// AuditorRootMismatchesTotal and setting AuditorRootMismatch to 1.
+// AuditorRootMismatchesTotal and setting AuditorRootMismatch and AuditorHalted to 1.
 func RecordAuditorRootMismatch() {
 	AuditorRootMismatchesTotal.Inc()
 	AuditorRootMismatch.Set(1)
+	AuditorHalted.Set(1)
 }
 
 // ResetAuditorRootMismatch resets the AuditorRootMismatch gauge to 0 (healthy).
@@ -189,4 +195,14 @@ func ResetAuditorRootMismatch() {
 // SetAuditorRootMismatch sets the AuditorRootMismatch gauge to val.
 func SetAuditorRootMismatch(val float64) {
 	AuditorRootMismatch.Set(val)
+}
+
+// SetAuditorHalted sets the AuditorHalted gauge to val.
+func SetAuditorHalted(val float64) {
+	AuditorHalted.Set(val)
+}
+
+// ResetAuditorHalted resets the AuditorHalted gauge to 0 (healthy).
+func ResetAuditorHalted() {
+	AuditorHalted.Set(0)
 }

@@ -27,8 +27,10 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	torchmpt "filippo.io/torchwood/mpt"
+	"github.com/transparency-dev/incubator/vindex/internal/metrics"
 	"github.com/transparency-dev/incubator/vindex/internal/wire"
 )
 
@@ -83,6 +85,17 @@ type syncCtl struct {
 	files     []*deferredSyncFile
 }
 
+func (c *syncCtl) updateDiskBytesMetric() {
+	if c == nil {
+		return
+	}
+	var total int64
+	for _, df := range c.files {
+		total += df.size
+	}
+	metrics.MPTMMapBytes.Set(float64(total))
+}
+
 func (c *syncCtl) syncPending() error {
 	if c == nil {
 		return nil
@@ -96,6 +109,7 @@ func (c *syncCtl) syncPending() error {
 			df.dirty = false
 		}
 	}
+	c.updateDiskBytesMetric()
 	return nil
 }
 
@@ -272,11 +286,18 @@ func Open(dir string) (*Manager, error) {
 		syncCtl:     ctl,
 		currentRoot: currentRoot,
 	}
+	ctl.updateDiskBytesMetric()
 	if initVer > 0 {
 		mgr.durableSize.Store(uint64(initVer))
 	}
 	mgr.exact.Store(initExact)
 	return mgr, nil
+}
+
+func (m *Manager) lockTreeWrite() {
+	waitStart := time.Now()
+	m.treeMu.Lock()
+	metrics.MPTLockWaitSeconds.Observe(time.Since(waitStart).Seconds())
 }
 
 // NewMem creates a new in-memory MPT manager.
@@ -294,7 +315,7 @@ func (m *Manager) RUnlock() { m.treeMu.RUnlock() }
 // Lock acquires the persistence and tree write locks.
 func (m *Manager) Lock() {
 	m.writeMu.Lock()
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 }
 
 // Unlock releases the tree and persistence write locks.
@@ -351,7 +372,7 @@ func (m *Manager) SetKeyBatch(mutations map[string][sha256.Size]byte) error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	defer m.treeMu.Unlock()
 
 	if m.syncCtl != nil {
@@ -373,7 +394,7 @@ func (m *Manager) Snap(version int64) ([sha256.Size]byte, error) {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	defer m.treeMu.Unlock()
 
 	if m.syncCtl != nil {
@@ -397,7 +418,7 @@ func (m *Manager) CommitBatchAndPersist(batch Batch, version int64, onCommitted 
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	treeLocked := true
 	defer func() {
 		if m.syncCtl != nil {
@@ -460,7 +481,7 @@ func (m *Manager) CommitKeysWithVersion(mutations map[string][sha256.Size]byte, 
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	defer m.treeMu.Unlock()
 
 	if m.syncCtl != nil {
@@ -572,7 +593,7 @@ func (m *Manager) Persist() error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	if m.syncCtl != nil {
 		m.syncCtl.deferSync = true
 	}
@@ -601,7 +622,7 @@ func (m *Manager) Close() error {
 	m.writeMu.Lock()
 	defer m.writeMu.Unlock()
 
-	m.treeMu.Lock()
+	m.lockTreeWrite()
 	defer m.treeMu.Unlock()
 
 	if m.syncCtl != nil {

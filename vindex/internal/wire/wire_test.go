@@ -723,3 +723,65 @@ func TestAdversarialSpecStrictness(t *testing.T) {
 		t.Fatal("expected ParseVerifier to fail on missing file path")
 	}
 }
+
+func TestPolicyOrigin(t *testing.T) {
+	_, vkey1, err := note.GenerateKey(rand.Reader, "example.com/log1")
+	if err != nil {
+		t.Fatalf("GenerateKey(1) failed: %v", err)
+	}
+	_, vkey2, err := note.GenerateKey(rand.Reader, "example.com/log2")
+	if err != nil {
+		t.Fatalf("GenerateKey(2) failed: %v", err)
+	}
+	v1, err := ParseVerifier(vkey1)
+	if err != nil {
+		t.Fatalf("ParseVerifier(1) failed: %v", err)
+	}
+
+	// 1. BuildPolicy infers verifier name when origin == "" and honors explicit origin.
+	builtDefault, err := BuildPolicy("", v1, nil, 0)
+	if err != nil {
+		t.Fatalf("BuildPolicy default failed: %v", err)
+	}
+	if got := PolicyOrigin(builtDefault); got != "example.com/log1" {
+		t.Fatalf("PolicyOrigin(builtDefault) = %q, want example.com/log1", got)
+	}
+	builtCustom, err := BuildPolicy("custom.origin/log", v1, nil, 0)
+	if err != nil {
+		t.Fatalf("BuildPolicy custom failed: %v", err)
+	}
+	if got := PolicyOrigin(builtCustom); got != "custom.origin/log" {
+		t.Fatalf("PolicyOrigin(builtCustom) = %q, want custom.origin/log", got)
+	}
+
+	// 2. ParsePolicy derives single-log origin automatically, and returns "" for multi-log policies unless overridden.
+	singlePolBytes := fmt.Appendf(nil, "log %s\nquorum none\n", vkey1)
+	singlePol, err := ParsePolicy(singlePolBytes)
+	if err != nil {
+		t.Fatalf("ParsePolicy(single) failed: %v", err)
+	}
+	if got := PolicyOrigin(singlePol); got != "example.com/log1" {
+		t.Fatalf("PolicyOrigin(singlePol) = %q, want example.com/log1", got)
+	}
+
+	multiPolBytes := fmt.Appendf(nil, "log %s\nlog %s\nquorum none\n", vkey1, vkey2)
+	multiPol, err := ParsePolicy(multiPolBytes)
+	if err != nil {
+		t.Fatalf("ParsePolicy(multi) failed: %v", err)
+	}
+	if got := PolicyOrigin(multiPol); got != "" {
+		t.Fatalf("PolicyOrigin(multiPol) = %q, want empty", got)
+	}
+
+	polFile := filepath.Join(t.TempDir(), "multi.policy")
+	if err := os.WriteFile(polFile, multiPolBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	overriddenPol, err := ParsePolicyOrVerifier(polFile, "", "example.com/log2", nil, 0)
+	if err != nil {
+		t.Fatalf("ParsePolicyOrVerifier(multi with explicit origin) failed: %v", err)
+	}
+	if got := PolicyOrigin(overriddenPol); got != "example.com/log2" {
+		t.Fatalf("PolicyOrigin(overriddenPol) = %q, want example.com/log2", got)
+	}
+}
