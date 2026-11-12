@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/transparency-dev/incubator/vindex/internal/metrics"
 	"github.com/transparency-dev/incubator/vindex/internal/wire"
 	"github.com/transparency-dev/tessera"
 	"github.com/transparency-dev/tessera/api/layout"
@@ -122,13 +123,14 @@ func BuildWitnessGroup(urls, pubKeys []string) (tessera.WitnessGroup, error) {
 
 // POSIXOutputLog wraps a Tessera POSIX-backed tile log for appending and serving output log commitments.
 type POSIXOutputLog struct {
-	appender  *tessera.Appender
-	awaiter   *tessera.PublicationAwaiter
-	logReader tessera.LogReader
-	shutdown  func(context.Context) error
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-	closeErr  error
+	appender     *tessera.Appender
+	awaiter      *tessera.PublicationAwaiter
+	logReader    tessera.LogReader
+	hasWitnesses bool
+	shutdown     func(context.Context) error
+	cancel       context.CancelFunc
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 var _ OutputLogClient = (*POSIXOutputLog)(nil)
@@ -202,12 +204,22 @@ func NewPOSIXOutputLog(ctx context.Context, storageDir string, signer note.Signe
 	}, 5*time.Millisecond)
 
 	return &POSIXOutputLog{
-		appender:  appender,
-		awaiter:   awaiter,
-		logReader: logReader,
-		shutdown:  shutdown,
-		cancel:    cancel,
+		appender:     appender,
+		awaiter:      awaiter,
+		logReader:    logReader,
+		hasWitnesses: cfg.witnessGroup != nil,
+		shutdown:     shutdown,
+		cancel:       cancel,
 	}, nil
+}
+
+func (l *POSIXOutputLog) awaitPublication(ctx context.Context, fut tessera.IndexFuture) (tessera.Index, []byte, error) {
+	waitStart := time.Now()
+	idx, rawCP, err := l.awaiter.Await(ctx, fut)
+	if l.hasWitnesses {
+		metrics.WitnessWaitSeconds.Observe(time.Since(waitStart).Seconds())
+	}
+	return idx, rawCP, err
 }
 
 // AwaitQuiescent blocks until any sequenced or integrated entries ahead of the published checkpoint
@@ -222,7 +234,7 @@ func (l *POSIXOutputLog) AwaitQuiescent(ctx context.Context) error {
 		return err
 	}
 	target := nextIdx - 1
-	_, _, err = l.awaiter.Await(ctx, func() (tessera.Index, error) {
+	_, _, err = l.awaitPublication(ctx, func() (tessera.Index, error) {
 		return tessera.Index{Index: target}, nil
 	})
 	return err
@@ -236,7 +248,7 @@ func (l *POSIXOutputLog) Append(ctx context.Context, leafData []byte) (leafIdx u
 	if intSize, sErr := l.logReader.IntegratedSize(ctx); sErr == nil && intSize > 0 {
 		tipIdx := intSize - 1
 		if existing, gErr := l.readLeafAtTreeSize(ctx, tipIdx, intSize); gErr == nil && bytes.Equal(existing, leafData) {
-			index, rawCP, aErr := l.awaiter.Await(ctx, func() (tessera.Index, error) {
+			index, rawCP, aErr := l.awaitPublication(ctx, func() (tessera.Index, error) {
 				return tessera.Index{Index: tipIdx}, nil
 			})
 			if aErr != nil {
@@ -246,7 +258,7 @@ func (l *POSIXOutputLog) Append(ctx context.Context, leafData []byte) (leafIdx u
 		}
 	}
 
-	index, rawCP, err := l.awaiter.Await(ctx, l.appender.Add(ctx, tessera.NewEntry(leafData)))
+	index, rawCP, err := l.awaitPublication(ctx, l.appender.Add(ctx, tessera.NewEntry(leafData)))
 	if err != nil {
 		return 0, nil, fmt.Errorf("failed to append leaf: %w", err)
 	}

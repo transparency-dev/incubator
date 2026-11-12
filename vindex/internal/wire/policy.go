@@ -67,6 +67,10 @@ type builtPolicy struct {
 	tlog   policy.TLogPolicy
 }
 
+func (p *builtPolicy) Origin() string {
+	return p.origin
+}
+
 func (p *builtPolicy) Verify(checkpoint []byte) (*f_log.Checkpoint, error) {
 	if err := validateSignedCheckpointBytes(checkpoint, p.origin); err != nil {
 		return nil, fmt.Errorf("invalid checkpoint format: %w", err)
@@ -86,11 +90,30 @@ type parsedPolicy struct {
 	tlog   policy.TLogPolicy
 }
 
+func (p *parsedPolicy) Origin() string {
+	if p.origin != "" {
+		return p.origin
+	}
+	if len(p.tlog.Logs) == 1 && p.tlog.Logs[0].Verifier != nil {
+		return p.tlog.Logs[0].Verifier.Name()
+	}
+	return ""
+}
+
 func (p *parsedPolicy) Verify(checkpoint []byte) (*f_log.Checkpoint, error) {
-	if err := validateSignedCheckpointBytes(checkpoint, p.origin); err != nil {
+	if err := validateSignedCheckpointBytes(checkpoint, p.Origin()); err != nil {
 		return nil, fmt.Errorf("invalid checkpoint format: %w", err)
 	}
 	return p.tlog.Verify(checkpoint)
+}
+
+// PolicyOrigin returns the unambiguous expected checkpoint origin bound to p,
+// or "" if p does not specify a single log origin.
+func PolicyOrigin(p any) string {
+	if op, ok := p.(interface{ Origin() string }); ok {
+		return op.Origin()
+	}
+	return ""
 }
 
 // ParseVerifier parses a public key verifier string or file path into a note.Verifier.

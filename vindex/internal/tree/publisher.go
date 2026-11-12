@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -176,6 +177,9 @@ func (p *OutputPublisher) PublishKeyBatch(ctx context.Context, modifiedValueRoot
 	if from > inputLogCP.Size {
 		return nil, fmt.Errorf("from (%d) exceeds input log size (%d)", from, inputLogCP.Size)
 	}
+	if inputLogCP.Size > math.MaxInt64 {
+		return nil, fmt.Errorf("input log size (%d) overflows int64 MPT version", inputLogCP.Size)
+	}
 	if len(inputLogCP.Hash) != sha256.Size {
 		return nil, fmt.Errorf("invalid input log root hash length %d, want %d", len(inputLogCP.Hash), sha256.Size)
 	}
@@ -242,6 +246,9 @@ func (p *OutputPublisher) PublishKeyBatch(ctx context.Context, modifiedValueRoot
 	metrics.OutputLogAppendDurationSeconds.Observe(time.Since(appendStart).Seconds())
 
 	// Steps 2 & 3: Commit to MPT, assert predicted root, atomically ratchet ServingState under treeMu, then fsync outside treeMu
+	if clonedInCP.Size > math.MaxInt64 {
+		return nil, fmt.Errorf("input log size (%d) overflows int64 MPT version", clonedInCP.Size)
+	}
 	var newState *ServingState
 	writeStart := time.Now()
 	actualRoot, err := p.mptMgr.CommitBatchAndPersist(batch, int64(clonedInCP.Size), func(committedRoot [sha256.Size]byte) {

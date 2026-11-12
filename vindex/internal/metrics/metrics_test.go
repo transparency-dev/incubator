@@ -117,13 +117,20 @@ func TestMetrics_RegistrationAndMutation(t *testing.T) {
 	}
 
 	ResetAuditorRootMismatch()
+	ResetAuditorHalted()
 	if v := testutil.ToFloat64(AuditorRootMismatch); v != 0 {
 		t.Fatalf("AuditorRootMismatch after reset = %v, want 0", v)
+	}
+	if v := testutil.ToFloat64(AuditorHalted); v != 0 {
+		t.Fatalf("AuditorHalted after reset = %v, want 0", v)
 	}
 	beforeMismatches := testutil.ToFloat64(AuditorRootMismatchesTotal)
 	RecordAuditorRootMismatch()
 	if v := testutil.ToFloat64(AuditorRootMismatch); v != 1 {
 		t.Fatalf("AuditorRootMismatch after record = %v, want 1", v)
+	}
+	if v := testutil.ToFloat64(AuditorHalted); v != 1 {
+		t.Fatalf("AuditorHalted after RecordAuditorRootMismatch = %v, want 1", v)
 	}
 	if v := testutil.ToFloat64(AuditorRootMismatchesTotal); v != beforeMismatches+1 {
 		t.Fatalf("AuditorRootMismatchesTotal = %v, want %v", v, beforeMismatches+1)
@@ -132,4 +139,13 @@ func TestMetrics_RegistrationAndMutation(t *testing.T) {
 	if v := testutil.ToFloat64(AuditorRootMismatch); v != 0 {
 		t.Fatalf("AuditorRootMismatch after SetAuditorRootMismatch(0) = %v, want 0", v)
 	}
+	SetAuditorHalted(0)
+	if v := testutil.ToFloat64(AuditorHalted); v != 0 {
+		t.Fatalf("AuditorHalted after SetAuditorHalted(0) = %v, want 0", v)
+	}
+	SetAuditorHalted(1)
+	if v := testutil.ToFloat64(AuditorHalted); v != 1 {
+		t.Fatalf("AuditorHalted after SetAuditorHalted(1) = %v, want 1", v)
+	}
+	ResetAuditorHalted()
 }
