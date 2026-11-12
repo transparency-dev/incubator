@@ -424,6 +424,9 @@ func cloneBundleResults(results [][]MappedEntry) [][]MappedEntry {
 
 // Close closes all pooled module instances.
 func (h *WASMHost) Close(ctx context.Context) error {
+	if h == nil || h.compiled == nil {
+		return nil
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
@@ -452,6 +455,9 @@ type WASMRunner struct {
 // NewRunner creates a dedicated WASMRunner from the host.
 // The runner has exclusive access to its WASM module instance, eliminating pool and mutex overhead.
 func (h *WASMHost) NewRunner(ctx context.Context) (*WASMRunner, error) {
+	if h == nil || h.compiled == nil {
+		return nil, ErrHostClosed
+	}
 	h.mu.Lock()
 	if h.closed {
 		h.mu.Unlock()

@@ -170,6 +170,7 @@ type Verifier struct {
 	stateMu            sync.RWMutex
 	isHalted           bool
 	haltErr            error
+	metricsAddr        string
 	verifiedOutputSize uint64
 	verifiedInputSize  uint64
 	lastVerifiedRoot   [sha256.Size]byte
@@ -401,10 +402,12 @@ func New(cfg Config) (*Verifier, error) {
 	}
 
 	metrics.ResetAuditorRootMismatch()
+	metrics.ResetAuditorHalted()
 	return v, nil
 }
 
 func (v *Verifier) halt(err error) error {
+	metrics.SetAuditorHalted(1)
 	v.stateMu.Lock()
 	v.isHalted = true
 	v.haltErr = err
@@ -1059,6 +1062,7 @@ func (v *Verifier) commitInMemoryWatermarks(
 
 func (v *Verifier) updateMetrics(nextOutputSize, targetInputSize uint64, latestInCP *log.Checkpoint) {
 	metrics.ResetAuditorRootMismatch()
+	metrics.ResetAuditorHalted()
 	metrics.OutputTreeSize.Set(float64(nextOutputSize))
 	metrics.ServingTreeSize.Set(float64(targetInputSize))
 	metrics.KVCommittedSize.Set(float64(targetInputSize))
@@ -1067,6 +1071,13 @@ func (v *Verifier) updateMetrics(nextOutputSize, targetInputSize uint64, latestI
 	} else {
 		metrics.IndexingLag.Set(0)
 	}
+}
+
+// MetricsAddr returns the bound operational TCP address once Run has opened MetricsAddr.
+func (v *Verifier) MetricsAddr() string {
+	v.stateMu.RLock()
+	defer v.stateMu.RUnlock()
+	return v.metricsAddr
 }
 
 // Run executes the periodic polling loop and optionally serves operational endpoints on MetricsAddr.
@@ -1079,6 +1090,9 @@ func (v *Verifier) Run(ctx context.Context) error {
 			return fmt.Errorf("auditor admin listener failed on %s: %w", v.cfg.MetricsAddr, err)
 		}
 		actualAddr := ln.Addr().String()
+		v.stateMu.Lock()
+		v.metricsAddr = actualAddr
+		v.stateMu.Unlock()
 		mServer := server.NewHTTPServer(actualAddr, v.AdminHandler())
 		g.Go(func() error {
 			klog.Infof("Serving auditor metrics at http://%s/metrics", actualAddr)

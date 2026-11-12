@@ -356,8 +356,14 @@ func (c *Coordinator) recoverGenesisMPT(ctx context.Context, treeSize uint64, tr
 
 // Recover restores the MPT and ServingState after startup or an unclean shutdown.
 func (c *Coordinator) Recover(ctx context.Context) error {
+	if fErr := c.FatalError(); fErr != nil {
+		return fErr
+	}
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
+	if fErr := c.FatalError(); fErr != nil {
+		return fErr
+	}
 
 	rawOutCP, outCP, err := c.readVerifiedOutputCheckpoint(ctx)
 	if err != nil {
@@ -569,8 +575,14 @@ func (c *Coordinator) reconcilePublisherMetadata(tipLeaf *wire.OutputLogLeaf) er
 // SyncOnce fetches the latest checkpoint from the Input Log, verifies append-only consistency,
 // indexes missing leaf batches, and publishes the resulting MPT state commitment to the Output Log.
 func (c *Coordinator) SyncOnce(ctx context.Context) error {
+	if fErr := c.FatalError(); fErr != nil {
+		return fErr
+	}
 	c.syncMu.Lock()
 	defer c.syncMu.Unlock()
+	if fErr := c.FatalError(); fErr != nil {
+		return fErr
+	}
 
 	if c.fetcher == nil {
 		return nil
@@ -987,6 +999,14 @@ func (c *Coordinator) RecordFatalError(err error) {
 	}
 }
 
+// FatalError returns the recorded fatal error if the coordinator has permanently halted, or nil otherwise.
+func (c *Coordinator) FatalError() error {
+	if fErr := c.fatalErr.Load(); fErr != nil && *fErr != nil {
+		return *fErr
+	}
+	return nil
+}
+
 // RunPollLoop enters the periodic ingestion polling loop until ctx is canceled or a fatal error occurs.
 func (c *Coordinator) RunPollLoop(ctx context.Context, pollInterval time.Duration) error {
 	if pollInterval <= 0 {
@@ -1018,7 +1038,9 @@ func (c *Coordinator) RunPollLoop(ctx context.Context, pollInterval time.Duratio
 func (c *Coordinator) Run(ctx context.Context, pollInterval time.Duration) error {
 	if err := c.Recover(ctx); err != nil {
 		fErr := fmt.Errorf("startup recovery failed: %w", err)
-		c.RecordFatalError(fErr)
+		if ctx.Err() == nil || IsFatalSyncError(err) {
+			c.RecordFatalError(fErr)
+		}
 		return fErr
 	}
 	if err := c.SyncOnce(ctx); err != nil {

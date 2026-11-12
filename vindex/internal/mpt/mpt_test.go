@@ -803,3 +803,21 @@ func TestVerify_AdversarialWireBounds(t *testing.T) {
 		}
 	})
 }
+
+func TestManager_ProveAfterCloseFailsCleanly(t *testing.T) {
+	mgr, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	if _, err := mgr.CommitKeysWithVersion(map[string][sha256.Size]byte{
+		"com.example.": sha256.Sum256([]byte("v1")),
+	}, 1); err != nil {
+		t.Fatalf("CommitKeysWithVersion failed: %v", err)
+	}
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if _, _, _, err := mgr.ProveKey([]byte("com.example.")); !errors.Is(err, torchmpt.ErrModifiedTree) {
+		t.Fatalf("ProveKey after Close err = %v, want torchmpt.ErrModifiedTree", err)
+	}
+}

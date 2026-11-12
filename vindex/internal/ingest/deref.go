@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -40,18 +41,21 @@ type bundleCandidate struct {
 	sumDB   bool
 }
 
-// FetchVerifiedEntryByIndex fetches the entry at idx from baseURL and, when treeSize > 0 and treeRoot is non-zero,
-// cryptographically authenticates the entry against (treeSize, treeRoot) via an RFC 6962 inclusion proof.
+// FetchVerifiedEntryByIndex fetches the entry at idx from baseURL and cryptographically
+// authenticates the entry against (treeSize, treeRoot) via an RFC 6962 inclusion proof.
 func FetchVerifiedEntryByIndex(ctx context.Context, httpClient *http.Client, baseURL string, idx, treeSize uint64, treeRoot [32]byte) ([]byte, error) {
 	base := strings.TrimSpace(baseURL)
 	if base == "" {
 		return nil, errors.New("empty baseURL")
 	}
-	if treeSize > 0 && idx >= treeSize {
+	if treeSize == 0 {
+		return nil, errors.New("cannot verify entry inclusion against tree size 0")
+	}
+	if idx >= treeSize {
 		return nil, fmt.Errorf("entry index %d out of bounds for tree size %d", idx, treeSize)
 	}
-	if treeRoot != ([32]byte{}) && treeSize == 0 {
-		return nil, errors.New("cannot verify entry inclusion against tree size 0")
+	if treeRoot == ([32]byte{}) {
+		return nil, errors.New("cannot verify entry inclusion against zero treeRoot")
 	}
 
 	u, err := url.Parse(base)
@@ -60,6 +64,9 @@ func FetchVerifiedEntryByIndex(ctx context.Context, httpClient *http.Client, bas
 	}
 
 	bIdx := idx / uint64(layout.EntryBundleWidth)
+	if bIdx > math.MaxInt64 {
+		return nil, fmt.Errorf("bundle index %d overflows int64", bIdx)
+	}
 	offset := int(idx % uint64(layout.EntryBundleWidth))
 	p := layout.PartialTileSize(0, bIdx, treeSize)
 	isSumDB := strings.Contains(base, "sum.golang.org")
@@ -142,68 +149,69 @@ func FetchVerifiedEntryByIndex(ctx context.Context, httpClient *http.Client, bas
 		return nil, fmt.Errorf("entry bundle for index %d not found at %s", idx, baseURL)
 	}
 
-	if treeSize > 0 && treeRoot != ([32]byte{}) {
-		readTile := func(ctx context.Context, level, index uint64, p uint8) ([]byte, error) {
-			var tileCandidates []string
-			addSumDBTiles := func() {
-				w := int(p)
-				if w == 0 {
-					w = 256
-				}
-				tileCandidates = append(tileCandidates, tlog.Tile{H: 8, L: int(level), N: int64(index), W: w}.Path())
-				if p != 0 {
-					tileCandidates = append(tileCandidates, tlog.Tile{H: 8, L: int(level), N: int64(index), W: 256}.Path())
-				}
+	readTile := func(ctx context.Context, level, index uint64, p uint8) ([]byte, error) {
+		if level > 63 || index > math.MaxInt64 {
+			return nil, fmt.Errorf("tile coordinates (level=%d, index=%d) overflow signed bounds", level, index)
+		}
+		var tileCandidates []string
+		addSumDBTiles := func() {
+			w := int(p)
+			if w == 0 {
+				w = 256
 			}
-			if usedSumDB {
-				addSumDBTiles()
-			}
-			tileCandidates = append(tileCandidates, layout.TilePath(level, index, p))
+			tileCandidates = append(tileCandidates, tlog.Tile{H: 8, L: int(level), N: int64(index), W: w}.Path())
 			if p != 0 {
-				tileCandidates = append(tileCandidates, layout.TilePath(level, index, 0))
+				tileCandidates = append(tileCandidates, tlog.Tile{H: 8, L: int(level), N: int64(index), W: 256}.Path())
 			}
-			if !usedSumDB {
-				addSumDBTiles()
-			}
-			wantBytes := 256 * 32
-			if p != 0 {
-				wantBytes = int(p) * 32
-			}
-			var tileErr error
-			for _, tc := range tileCandidates {
-				data, ok, err := readBundleResource(ctx, httpClient, u, tc)
-				if err != nil {
-					tileErr = err
-					continue
-				}
-				if !ok {
-					continue
-				}
-				if len(data) < wantBytes {
-					tileErr = fmt.Errorf("tile %s too short: got %d bytes, want at least %d", tc, len(data), wantBytes)
-					continue
-				}
-				if len(data) > wantBytes {
-					data = data[:wantBytes]
-				}
-				return data, nil
-			}
-			if tileErr != nil {
-				return nil, tileErr
-			}
-			return nil, fmt.Errorf("hash tile level=%d index=%d p=%d not found at %s", level, index, p, baseURL)
 		}
-		pb, err := tclient.NewProofBuilder(ctx, treeSize, readTile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize inclusion proof builder for entry %d: %w", idx, err)
+		if usedSumDB {
+			addSumDBTiles()
 		}
-		incProof, err := pb.InclusionProof(ctx, idx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build inclusion proof for entry %d: %w", idx, err)
+		tileCandidates = append(tileCandidates, layout.TilePath(level, index, p))
+		if p != 0 {
+			tileCandidates = append(tileCandidates, layout.TilePath(level, index, 0))
 		}
-		if err := proof.VerifyInclusion(rfc6962.DefaultHasher, idx, treeSize, leafHash, incProof, treeRoot[:]); err != nil {
-			return nil, fmt.Errorf("entry %d failed Merkle inclusion verification against input root %x: %w", idx, treeRoot, err)
+		if !usedSumDB {
+			addSumDBTiles()
 		}
+		wantBytes := 256 * 32
+		if p != 0 {
+			wantBytes = int(p) * 32
+		}
+		var tileErr error
+		for _, tc := range tileCandidates {
+			data, ok, err := readBundleResource(ctx, httpClient, u, tc)
+			if err != nil {
+				tileErr = err
+				continue
+			}
+			if !ok {
+				continue
+			}
+			if len(data) < wantBytes {
+				tileErr = fmt.Errorf("tile %s too short: got %d bytes, want at least %d", tc, len(data), wantBytes)
+				continue
+			}
+			if len(data) > wantBytes {
+				data = data[:wantBytes]
+			}
+			return data, nil
+		}
+		if tileErr != nil {
+			return nil, tileErr
+		}
+		return nil, fmt.Errorf("hash tile level=%d index=%d p=%d not found at %s", level, index, p, baseURL)
+	}
+	pb, err := tclient.NewProofBuilder(ctx, treeSize, readTile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize inclusion proof builder for entry %d: %w", idx, err)
+	}
+	incProof, err := pb.InclusionProof(ctx, idx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build inclusion proof for entry %d: %w", idx, err)
+	}
+	if err := proof.VerifyInclusion(rfc6962.DefaultHasher, idx, treeSize, leafHash, incProof, treeRoot[:]); err != nil {
+		return nil, fmt.Errorf("entry %d failed Merkle inclusion verification against input root %x: %w", idx, treeRoot, err)
 	}
 
 	return entry, nil

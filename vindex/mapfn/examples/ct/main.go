@@ -165,7 +165,7 @@ func canonicalizeDomainBytes(raw []byte, outBuf *[256]byte) ([]byte, bool) {
 	if hasWildcard {
 		needed += 2
 	}
-	if len(raw) > 253 || needed > len(outBuf) {
+	if needed-1 > 253 || needed > len(outBuf) {
 		return nil, false
 	}
 

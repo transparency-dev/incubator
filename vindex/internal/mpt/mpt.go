@@ -625,6 +625,7 @@ func (m *Manager) Close() error {
 	m.lockTreeWrite()
 	defer m.treeMu.Unlock()
 
+	m.exact.Store(false)
 	if m.syncCtl != nil {
 		m.syncCtl.deferSync = false
 	}

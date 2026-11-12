@@ -1320,7 +1320,15 @@ func TestFetchVerifiedEntryByIndex(t *testing.T) {
 		t.Fatalf("ReadFile(level0Tile) failed: %v", err)
 	}
 
-	sumDBTile := []byte("golang.org/x/mod v0.1.0 h1:aaa=\ngolang.org/x/mod v0.1.0/go.mod h1:mmm=\n\ngolang.org/x/net v0.2.0 h1:bbb=\n")
+	sumDBRec0 := []byte("golang.org/x/mod v0.1.0 h1:aaa=\ngolang.org/x/mod v0.1.0/go.mod h1:mmm=\n")
+	sumDBRec1 := []byte("golang.org/x/net v0.2.0 h1:bbb=\n")
+	sumDBTile := append(append([]byte(nil), sumDBRec0...), '\n')
+	sumDBTile = append(sumDBTile, sumDBRec1...)
+	sumDBH0 := rfc6962.DefaultHasher.HashLeaf(sumDBRec0)
+	sumDBH1 := rfc6962.DefaultHasher.HashLeaf(sumDBRec1)
+	sumDBHashTile := append(append([]byte(nil), sumDBH0...), sumDBH1...)
+	var sumDBRoot [32]byte
+	copy(sumDBRoot[:], rfc6962.DefaultHasher.HashChildren(sumDBH0, sumDBH1))
 
 	staticCTDataTile := []byte{
 		0x00, 0x00, 0x01, 0x8b, 0xcf, 0xee, 0x58, 0x00, // timestamp (first two bytes are 0x00, 0x00)
@@ -1373,6 +1381,9 @@ func TestFetchVerifiedEntryByIndex(t *testing.T) {
 	mux.HandleFunc("/sum.golang.org/tile/8/data/000.p/2", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(sumDBTile)
 	})
+	mux.HandleFunc("/sum.golang.org/tile/8/0/000.p/2", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(sumDBHashTile)
+	})
 	// Truncated bundle (claims 3 entries via treeSize=3, only contains 1 entry)
 	mux.HandleFunc("/truncated/tile/entries/000.p/3", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write(entriesTile[:2+len("entry-0")])
@@ -1408,7 +1419,7 @@ func TestFetchVerifiedEntryByIndex(t *testing.T) {
 		t.Fatal("expected FetchVerifiedEntryByIndex to fail with wrong treeRoot")
 	}
 
-	gotSumDB0, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/sum.golang.org", 0, 2, [32]byte{})
+	gotSumDB0, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/sum.golang.org", 0, 2, sumDBRoot)
 	if err != nil {
 		t.Fatalf("FetchVerifiedEntryByIndex(sumdb, 0) failed: %v", err)
 	}
@@ -1417,7 +1428,7 @@ func TestFetchVerifiedEntryByIndex(t *testing.T) {
 		t.Fatalf("FetchVerifiedEntryByIndex(sumdb, 0) = %q, want %q", gotSumDB0, wantSumDB0)
 	}
 
-	gotSumDB1, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/sum.golang.org", 1, 2, [32]byte{})
+	gotSumDB1, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/sum.golang.org", 1, 2, sumDBRoot)
 	if err != nil {
 		t.Fatalf("FetchVerifiedEntryByIndex(sumdb, 1) failed: %v", err)
 	}
@@ -1425,8 +1436,15 @@ func TestFetchVerifiedEntryByIndex(t *testing.T) {
 		t.Fatalf("FetchVerifiedEntryByIndex(sumdb, 1) = %q", gotSumDB1)
 	}
 
-	if _, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/truncated", 2, 3, [32]byte{}); err == nil {
+	if _, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/truncated", 2, 3, [32]byte(rootHash)); err == nil {
 		t.Fatal("expected error when bundle has fewer entries than requested offset")
+	}
+
+	if _, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/c2sp", 0, 0, [32]byte{}); err == nil {
+		t.Fatal("expected error for treeSize == 0")
+	}
+	if _, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/c2sp", 0, 3, [32]byte{}); err == nil {
+		t.Fatal("expected error for zero treeRoot")
 	}
 
 	if _, err := FetchVerifiedEntryByIndex(ctx, srv.Client(), srv.URL+"/c2sp", 3, 3, [32]byte(rootHash)); err == nil {
