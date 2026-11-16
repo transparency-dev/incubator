@@ -14,9 +14,9 @@ require (
 	github.com/transparency-dev/formats v0.1.2-0.20261027211732-55fe9bf0fa53
 	github.com/transparency-dev/merkle v0.0.2
 	github.com/transparency-dev/tessera v1.0.4
-	golang.org/x/mod v0.42.0
+	golang.org/x/mod v0.43.0
 	golang.org/x/net v0.62.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	k8s.io/klog/v2 v2.140.0
 )
 
