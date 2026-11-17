@@ -199,6 +199,9 @@ func TestDomainToCanonicalKey(t *testing.T) {
 		"-leading.example.com",
 		"trailing-.example.com",
 		"\u00a0example.com", // Non-ASCII NBSP must be rejected by IDNA2008, not stripped as whitespace
+		"localhost",
+		"*.com",
+		"192.0.2.1",
 		overlongLabel,
 		overlongDomain,
 	} {

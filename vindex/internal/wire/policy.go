@@ -165,7 +165,13 @@ func ParseVerifier(keyOrPath string) (note.Verifier, error) {
 		return NewMTCVerifier(name, ed25519.PublicKey(pubKeyBytes), cosignerID, logID)
 	}
 
-	return f_note.NewVerifier(s)
+	if v, err := f_note.NewVerifier(s); err == nil {
+		return v, nil
+	} else if cv, cErr := f_note.NewVerifierForCosignatureV1(s); cErr == nil {
+		return cv, nil
+	} else {
+		return nil, err
+	}
 }
 
 // ParseWitnessVerifier parses a witness cosignature or note verifier key string or file path.

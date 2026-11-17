@@ -22,6 +22,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/transparency-dev/incubator/vindex/internal/metrics"
 )
 
 // maxInMemoryBundles bounds the in-memory fallback cache when cacheDir is empty.
@@ -47,11 +49,17 @@ func NewManagedTileCache(cacheDir string, bundleSz uint64) (*ManagedTileCache, e
 			return nil, fmt.Errorf("failed to create tile cache dir %q: %w", cacheDir, err)
 		}
 	}
-	return &ManagedTileCache{
+	c := &ManagedTileCache{
 		cacheDir: cacheDir,
 		memory:   make(map[uint64]*LeafBundle),
 		bundleSz: bundleSz,
-	}, nil
+	}
+	if cacheDir != "" {
+		if sz, err := c.DirSize(); err == nil {
+			metrics.TileCacheBytes.Set(float64(sz))
+		}
+	}
+	return c, nil
 }
 
 // bundlePath returns the sharded filepath for a bundle index.

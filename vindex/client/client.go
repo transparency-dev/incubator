@@ -125,6 +125,9 @@ func DomainToCanonicalKey(domain string) (string, error) {
 	}
 
 	labels := strings.Split(string(buf), ".")
+	if len(labels) < 2 {
+		return "", fmt.Errorf("%w: domain %q must have at least two labels", ErrBadRequest, domain)
+	}
 	for _, lbl := range labels {
 		if lbl == "" || len(lbl) > 63 {
 			return "", fmt.Errorf("%w: empty or overlong DNS label in %q", ErrBadRequest, domain)
@@ -137,6 +140,17 @@ func DomainToCanonicalKey(domain string) (string, error) {
 				return "", fmt.Errorf("%w: invalid DNS label character %q in %q", ErrBadRequest, lbl[j], domain)
 			}
 		}
+	}
+	tld := labels[len(labels)-1]
+	allNumericTLD := true
+	for i := 0; i < len(tld); i++ {
+		if tld[i] < '0' || tld[i] > '9' {
+			allNumericTLD = false
+			break
+		}
+	}
+	if allNumericTLD {
+		return "", fmt.Errorf("%w: domain %q has all-numeric TLD", ErrBadRequest, domain)
 	}
 
 	var b strings.Builder
@@ -361,6 +375,9 @@ func verifyKeysBody(rawBody []byte, target string, isPrefix bool, cfg Config, cl
 	}
 	if bindSec.InputSize == 0 && bindSec.InputRoot != wire.EmptyRoot() {
 		return nil, fmt.Errorf("%w: non-empty input-root at input_size 0", ErrVerificationFailed)
+	}
+	if bindSec.InputSize > 0 && bindSec.InputRoot == ([sha256.Size]byte{}) {
+		return nil, fmt.Errorf("%w: zero input-root at input_size %d", ErrVerificationFailed, bindSec.InputSize)
 	}
 	if bindSec.InputSize == bindSec.From && (bindSec.MPTRoot != wire.EmptyRoot() || len(keysSec.Matches) > 0) {
 		return nil, fmt.Errorf("%w: non-empty MPT state when input_size (%d) == from (%d)", ErrVerificationFailed, bindSec.InputSize, bindSec.From)
