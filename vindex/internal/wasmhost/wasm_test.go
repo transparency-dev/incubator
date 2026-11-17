@@ -624,6 +624,32 @@ func TestWASMRunner_FailsSubsequentCallsAfterError(t *testing.T) {
 	}
 }
 
+func TestWASMRunner_ContextCanceledIsNotWasmHalt(t *testing.T) {
+	ctx := t.Context()
+	host, err := NewWASMHost(ctx, wasmtest.Bytes(), 1)
+	if err != nil {
+		t.Fatalf("NewWASMHost failed: %v", err)
+	}
+	defer func() { _ = host.Close(ctx) }()
+
+	// Drain the pre-warmed instance so subsequent NewRunner must instantiate a module.
+	runner, err := host.NewRunner(ctx)
+	if err != nil {
+		t.Fatalf("NewRunner failed: %v", err)
+	}
+	defer func() { _ = runner.Close(ctx) }()
+
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	if _, err := runner.MapBundle(canceledCtx, [][]byte{[]byte("leaf")}); !errors.Is(err, context.Canceled) || errors.Is(err, ErrWasmHalt) {
+		t.Fatalf("MapBundle(canceledCtx) = %v, want context.Canceled (not ErrWasmHalt)", err)
+	}
+	if _, err := host.NewRunner(canceledCtx); !errors.Is(err, context.Canceled) || errors.Is(err, ErrWasmHalt) {
+		t.Fatalf("NewRunner(canceledCtx) = %v, want context.Canceled (not ErrWasmHalt)", err)
+	}
+}
+
 func TestZeroReader_Infinite(t *testing.T) {
 	var zr zeroReader
 	buf := bytes.Repeat([]byte{0xaa}, 4096)
