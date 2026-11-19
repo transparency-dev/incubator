@@ -445,6 +445,9 @@ func setFetcherTreeState(f ingest.TileFetcher, size uint64, hash [sha256.Size]by
 }
 
 func isFatalWASMError(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
 	return errors.Is(err, wasmhost.ErrWasmHalt) ||
 		errors.Is(err, wasmhost.ErrInvalidMemory) ||
 		errors.Is(err, wasmhost.ErrMalformedOutput)
@@ -821,7 +824,7 @@ func (v *Verifier) verifyLeaf(
 			}
 		}
 		if err := <-errChan; err != nil {
-			if isFatalWASMError(err) {
+			if !errors.Is(ctx.Err(), context.Canceled) && isFatalWASMError(err) {
 				return v.halt(fmt.Errorf("deterministic WASM fault for leaf %d: %w", leafIdx, err))
 			}
 			return fmt.Errorf("input streaming failed for leaf %d [%d, %d): %w", leafIdx, startInputSize, targetInputSize, err)
@@ -964,7 +967,7 @@ func (v *Verifier) verifyGenesisBackfillLeaf(
 			}
 		}
 		if err := <-errChan; err != nil {
-			if isFatalWASMError(err) {
+			if !errors.Is(ctx.Err(), context.Canceled) && isFatalWASMError(err) {
 				return v.halt(fmt.Errorf("deterministic WASM fault for genesis leaf %d: %w", leafIdx, err))
 			}
 			return fmt.Errorf("genesis input streaming failed for leaf %d [%d, %d): %w", leafIdx, startInputSize, targetInputSize, err)

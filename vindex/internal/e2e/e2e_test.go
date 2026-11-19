@@ -127,10 +127,12 @@ type testCluster struct {
 	inLogDir    string
 	inOrigin    string
 	outOrigin   string
+	inVerifier  note.Verifier
 	inPolicy    client.CheckpointPolicy
 	outSigner   note.Signer
 	outVerifier note.Verifier
 	inAppender  *tessera.Appender
+	inReader    tessera.LogReader
 	inAwaiter   *tessera.PublicationAwaiter
 	storage     vindex.StorageConfig
 	chunkSize   uint64
@@ -209,10 +211,12 @@ func newTestCluster(t *testing.T, ctx context.Context, chunkSize uint64) *testCl
 		inLogDir:    inLogDir,
 		inOrigin:    inOrigin,
 		outOrigin:   outOrigin,
+		inVerifier:  inVerifier,
 		inPolicy:    inPolicy,
 		outSigner:   outSigner,
 		outVerifier: outVerifier,
 		inAppender:  inAppender,
+		inReader:    inReader,
 		inAwaiter:   inAwaiter,
 		storage: vindex.StorageConfig{
 			DBPath:       filepath.Join(rootDir, "db"),

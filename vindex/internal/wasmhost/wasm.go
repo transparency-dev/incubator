@@ -202,7 +202,10 @@ func (h *WASMHost) instantiateInstance(ctx context.Context) (*wasmInstance, erro
 	}
 	res, err := inBufFn.Call(ctx)
 	if err != nil {
-		_ = mod.Close(ctx)
+		_ = mod.Close(context.Background())
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, fmt.Errorf("input_buffer call interrupted: %w", ctx.Err())
+		}
 		return nil, fmt.Errorf("%w: input_buffer call failed: %v", ErrWasmHalt, err)
 	}
 	if len(res) == 0 {
@@ -265,6 +268,9 @@ func (inst *wasmInstance) executeBundle(ctx context.Context, leaves [][]byte) ([
 
 	callRes, err := inst.mapBundleFn.Call(ctx, uint64(inPtr), uint64(inputLen))
 	if err != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil, fmt.Errorf("map_bundle execution interrupted: %w", ctx.Err())
+		}
 		return nil, fmt.Errorf("%w: map_bundle execution failed: %v", ErrWasmHalt, err)
 	}
 	if len(callRes) == 0 {
@@ -517,7 +523,7 @@ func (r *WASMRunner) Close(ctx context.Context) error {
 
 	if r.hadErr {
 		if r.inst.mod != nil {
-			err := r.inst.mod.Close(ctx)
+			err := r.inst.mod.Close(context.Background())
 			r.inst.mod = nil
 			return err
 		}
