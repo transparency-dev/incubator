@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	fnote "github.com/transparency-dev/formats/note"
 	"github.com/transparency-dev/incubator/vindex"
 	"github.com/transparency-dev/incubator/vindex/client"
 	"github.com/transparency-dev/incubator/vindex/internal/wasmhost/wasmhosttest"
@@ -731,4 +732,101 @@ func TestEngine_HandlersLifecycleAndValidation(t *testing.T) {
 			t.Fatal("expected /readyz to transition to 503 after fatal background sync error")
 		}
 	})
+}
+
+func TestEngine_MLDSA44OutputLog_EndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	inSKey, inVKey, err := fnote.GenerateMLDSAKey("test.mldsa.inputlog")
+	if err != nil {
+		t.Fatalf("GenerateMLDSAKey(input) failed: %v", err)
+	}
+	inSigner, err := fnote.NewSigner(inSKey)
+	if err != nil {
+		t.Fatalf("fnote.NewSigner(input) failed: %v", err)
+	}
+	inVerifier, err := fnote.NewVerifier(inVKey)
+	if err != nil {
+		t.Fatalf("fnote.NewVerifier(input) failed: %v", err)
+	}
+	inPolicy, err := client.SingleKeyPolicy("test.mldsa.inputlog", inVerifier)
+	if err != nil {
+		t.Fatalf("SingleKeyPolicy(in) failed: %v", err)
+	}
+
+	outSKey, outVKey, err := fnote.GenerateMLDSAKey("test.mldsa.outputlog")
+	if err != nil {
+		t.Fatalf("GenerateMLDSAKey(output) failed: %v", err)
+	}
+	outSigner, err := fnote.NewSigner(outSKey)
+	if err != nil {
+		t.Fatalf("fnote.NewSigner(output) failed: %v", err)
+	}
+	outVerifier, err := fnote.NewVerifier(outVKey)
+	if err != nil {
+		t.Fatalf("fnote.NewVerifier(output) failed: %v", err)
+	}
+
+	rootDir := t.TempDir()
+	inLogDir := filepath.Join(rootDir, "inlog")
+	appendLeaves := newPOSIXInputLog(t, ctx, inLogDir, inSigner)
+	if idxs := appendLeaves([]byte("pqc-key one")); !slices.Equal(idxs, []uint64{0}) {
+		t.Fatalf("unexpected indices: %v", idxs)
+	}
+
+	engine, err := vindex.New(vindex.StorageConfig{
+		DBPath:       filepath.Join(rootDir, "db"),
+		MPTDir:       testMPTDir(rootDir, "mpt"),
+		TileCacheDir: filepath.Join(rootDir, "cache"),
+		OutputLogDir: filepath.Join(rootDir, "outlog"),
+	}, outSigner,
+		vindex.WithInputLog("file://"+inLogDir, inPolicy, wasmhosttest.Host()),
+		vindex.WithTuning(vindex.TuningOptions{
+			ChunkSize:    64,
+			PollInterval: 50 * time.Millisecond,
+		}),
+	)
+	if err != nil {
+		t.Fatalf("vindex.New(ML-DSA-44) failed: %v", err)
+	}
+	defer func() { _ = engine.Close() }()
+
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("engine.Start(ML-DSA-44) failed: %v", err)
+	}
+
+	ts := httptest.NewServer(engine.Handler())
+	defer ts.Close()
+
+	outPolicy, err := client.SingleKeyPolicy("test.mldsa.outputlog", outVerifier)
+	if err != nil {
+		t.Fatalf("SingleKeyPolicy failed: %v", err)
+	}
+	cli, err := client.New(ts.URL, client.Config{
+		ExpectedOutputLogOrigin: "test.mldsa.outputlog",
+		OutputLogPolicy:         outPolicy,
+		ExpectedInputLogOrigin:  "test.mldsa.inputlog",
+	}, client.WithHTTPClient(ts.Client()))
+	if err != nil {
+		t.Fatalf("client.New failed: %v", err)
+	}
+
+	res, err := cli.LookupKey(ctx, "pqc-key")
+	if err != nil {
+		t.Fatalf("LookupKey(pqc-key) failed: %v", err)
+	}
+	if len(res.Keys) != 1 {
+		t.Fatalf("LookupKey(pqc-key) returned %d keys, want 1", len(res.Keys))
+	}
+	var gotIndices []uint64
+	for idx, err := range res.Keys[0].Values(ctx) {
+		if err != nil {
+			t.Fatalf("Values(pqc-key) failed: %v", err)
+		}
+		gotIndices = append(gotIndices, idx)
+	}
+	if !slices.Equal(gotIndices, []uint64{0}) {
+		t.Fatalf("Values(pqc-key) = %v, want [0]", gotIndices)
+	}
 }
