@@ -1,0 +1,69 @@
+services:
+  # Upstream Go SumDB HTTP proxy
+  sumdbproxy:
+    build:
+      context: ../..
+      dockerfile: deploy/sumdb/Dockerfile
+      target: sumdbproxy
+    restart: unless-stopped
+
+  # VIndex Daemon with bundled sumdb.wasm MapFn
+  vindexd:
+    build:
+      context: ../..
+      dockerfile: deploy/sumdb/Dockerfile
+      target: vindexd
+    restart: unless-stopped
+    depends_on:
+      - sumdbproxy
+    volumes:
+      - vindex_data:/data
+
+  # Prometheus metrics scraper
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+  # Grafana dashboard visualization
+  grafana:
+    image: grafana/grafana:11.1.0
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_SERVER_ROOT_URL=http://localhost:8080/grafana/
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+
+  # Caddy Unified Gateway & Reverse Proxy
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - vindexd
+      - sumdbproxy
+      - grafana
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  vindex_data:
+  prometheus_data:
+  grafana_data:

@@ -45,6 +45,22 @@ verify-wasm wasm="bin/starter.wasm" input="package:github.com/foo/bar@v1.0.0":
 demo-local:
     @./scripts/demo-local.sh
 
+# Launch the full Go SumDB VIndex Docker Compose stack
+run-sumdb:
+    docker compose -f deploy/sumdb/docker-compose.yml up -d --build
+    @echo "SumDB VIndex stack running at http://localhost:8080 (Grafana: http://localhost:8080/grafana/)"
+
+# Query the local Go SumDB VIndex stack with full cryptographic verification
+query-sumdb key="golang.org/x/mod":
+    @go run ./vindex/cmd/vindex-client \
+        --vindex_url=http://localhost:8080 \
+        --output_log_pubkey="sumdb.vindex.local+9a36b0c7+ASYC8f2R5P54YfkLLnPTWGuizJ97M+8lclIrqqI60nrU" \
+        --input_log_origin="go.sum database tree" \
+        --input_log_pubkey="sum.golang.org+033de0ae+Ac4zctda0e5eza+HJyk9SxEdh+s3Ux18htTTAD8OuAn8" \
+        --input_log_url=http://localhost:8080/sumdb/ \
+        --dereference \
+        --key={{quote(key)}}
+
 # Remove build artifacts
 clean:
     rm -rf bin/

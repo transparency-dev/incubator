@@ -1,0 +1,28 @@
+{
+    admin off
+    auto_https off
+}
+
+:8080 {
+    log {
+        output stdout
+        format console
+    }
+
+    # Upstream SumDB tile proxy
+    redir /sumdb /sumdb/ 308
+    handle_path /sumdb/* {
+        reverse_proxy sumdbproxy:8089
+    }
+
+    # Grafana Dashboard UI
+    redir /grafana /grafana/ 308
+    handle /grafana/* {
+        reverse_proxy grafana:3000
+    }
+
+    # Core VIndex daemon: UI, C2SP REST API, checkpoints, tiles
+    handle {
+        reverse_proxy vindexd:8080
+    }
+}
