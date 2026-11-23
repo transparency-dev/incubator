@@ -1,11 +1,16 @@
-# Go binaries
+# Build output directory
+/bin/
+
+# Go binaries (when built into repo root without -o)
+/clonelog
 /cmd
-/proxy
-/client
-/ct
-/logandmap
-/sumdbindex
+/hammer
+/keygen
+/mock_log
 /sumdbverify
+/vindex-auditor
+/vindex-client
+/vindex-wasm
 /vindexd
 
 # Go test binaries and coverage/profile outputs
