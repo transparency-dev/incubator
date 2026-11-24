@@ -11,8 +11,8 @@ require (
 	github.com/google/go-cmp v0.7.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/tetratelabs/wazero v1.12.0
-	github.com/transparency-dev/formats v0.1.2-0.20261027211732-55fe9bf0fa53
-	github.com/transparency-dev/merkle v0.0.2
+	github.com/transparency-dev/formats v0.1.2-0.20261123105005-c97e37833724
+	github.com/transparency-dev/merkle v0.0.3-0.20261123105104-897d64ff9268
 	github.com/transparency-dev/tessera v1.0.4
 	golang.org/x/mod v0.43.0
 	golang.org/x/net v0.63.0
